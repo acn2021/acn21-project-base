@@ -88,14 +88,124 @@ class FattreeNode(Node):
 
 class Jellyfish:
 
-    def __init__(self, num_servers, num_switches, num_ports):
-        self.servers = []
-        self.switches = []
-        self.generate(num_servers, num_switches, num_ports)
+	def __init__(self, num_servers, num_switches, num_ports):
+		self.servers = []
+		self.switches = []
+		self.generate(num_servers, num_switches, num_ports)
 
-    # TODO: code for generating the jellyfish topology
-    def generate(self, num_servers, num_switches, num_ports):
-        pass
+	def generate(self, num_servers, num_switches, num_ports):
+
+		# Everything in quotes is from the paper.
+		# "Each ToR switch i has some number k(i) of ports, of which it uses r(i) to connect to other ToR switches, and
+		# uses the remaining k(i) - r(i) ports for servers.", here the (i) is a subscript.
+		# Then, later it says: "In the simplest case, which we consider by default throughout this paper, every switch 
+		# has the same number of ports and servers: <forall>i, k = k(i) and r = r(i).".
+		# Therefore, every switch is connected to the same number of servers.
+		# Howerver, Figure 1(b) shows that every single server is connected to only one switch (inconsistent with the text).
+		# This will never work if there were 686 servers and 245 switches... 
+		# For this topology to work with 686 servers and 245 switches, one would need to connect every switch to 
+		# num_servers/num_switches = 2.8 servers -> 3 ports used for servers per switch, 2 for some!
+		# For the fat-tree topology, every switch in the edge-layer is connected to num_ports/2 servers
+
+		############################## initialize servers and switches ##############################
+		server_to_connect = []
+		switches_to_connect = []
+		for i in range(num_switches):
+			self.switches.append(Node(i, "switch"))
+			switches_to_connect.append(self.switches[i])
+
+		for i in range(num_servers):
+			self.servers.append(Node(i + len(self.switches), "server"))
+			server_to_connect.append(self.servers[i])
+
+		# Connect all servers to a switch, such that every switch connects to (roughly) the same number of servers
+		while len(server_to_connect) != 0:
+			for switch in self.switches:
+				if len(server_to_connect) == 0:
+					break
+				server_to_connect[0].add_edge(switch) # add a server to a switch
+				server_to_connect = server_to_connect[1:] # remove the server that just got connected from the todo list.
+				
+		
+		############################### connect all switches randomly ###############################
+
+		# loop through all switches, connect switch i with a random other switch on position i + r, where r is a random number.
+		for i in range(len(self.switches)-2):
+			for _ in range(0, num_ports-len(self.switches[i].edges)):
+				looped = False
+				other = random.randint(i + 1, len(self.switches)-1)
+				while len(self.switches[other].edges) >= num_ports or self.switches[i].is_neighbor(self.switches[other]): # Choose new random switch until one is found that has port and is not neighbor
+					other += 1
+					if other >= len(self.switches):
+						if looped:
+							break
+						looped = True
+						other = i + 1
+				if other < len(self.switches):
+					self.switches[i].add_edge(self.switches[other])
+		
+
+		for i in range(len(self.switches)):
+			while num_ports - len(self.switches[i].edges) >= 2:
+				other_a = self.switches[random.randint(0, len(self.switches)-1)]
+				while self.switches[i].is_neighbor(other_a):
+					other_a = self.switches[random.randint(0, len(self.switches)-1)]
+				# Now, we have found a node a that is not the neighbor
+				break_edge = None
+				for edge in other_a.edges:
+					other_b = edge.lnode if edge.lnode != other_a else edge.rnode
+					if other_b.type == "server":
+						continue
+					if self.switches[i].is_neighbor(other_b):
+						continue
+					break_edge = edge
+					break
+				if not break_edge:
+					continue
+				break_edge.remove()
+				self.switches[i].add_edge(other_a)
+				self.switches[i].add_edge(other_b)
+		##### check if there are lonely ports and potentially break a link to create two new ones #####
+		lonely_ports = []
+		for switch in self.switches:
+			if len(switch.edges) == num_ports - 1:
+				lonely_ports.append(switch)
+
+		while len(lonely_ports) >= 2:
+			switch_a, switch_b = random.sample(lonely_ports, 2)
+			if not switch_a.is_neighbor(switch_b):
+				switch_a.add_edge(switch_b)
+				lonely_ports.remove(switch_a)
+				lonely_ports.remove(switch_b)
+				continue
+			# Get a random switch that has NO connection with switch a or switch b.
+			current = random.choice(self.switches) 
+			while current.is_neighbor(switch_a) or current.is_neighbor(switch_b) or current == switch_a or current == switch_b:
+				current = random.choice(self.switches)
+			
+			for edge in current.edges:
+				other = edge.lnode if current != edge.lnode else edge.rnode
+				if other.type == "server" or other.is_neighbor(switch_a) or other.is_neighbor(switch_b):
+					continue
+				# break edge, add current to switch a, other to switch b
+				edge.remove()
+				current.add_edge(switch_a)
+				other.add_edge(switch_b)
+
+				lonely_ports.remove(switch_a)
+				lonely_ports.remove(switch_b)
+				break
+
+		######### Perform a sanity check to see if graph is fully connected. If not-> retry #########
+		# pt = Paths(self)
+		# source = self.servers[0]
+		# for server in self.servers:
+		# 	if server == source:
+		# 		continue
+		# 	if not pt.is_path(source, server):
+		# 		print("Generated topology has components, retrying...")
+		# 		self.generate(num_servers, num_switches, num_ports)
+
 
 class Fattree:
     """Fattree topology.
