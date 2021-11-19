@@ -290,6 +290,6 @@ if (is_fat_tree):
     Fattree(int(args.ports))
 elif (is_jellyfish):
     # raise NotImplementedError("Jellyfish is not implemented yet")
-    pass
+    Jellyfish(16, 20, 4)
 else:
     raise ValueError(f"Argument {args.topology} is invalid, choose 'fattree' or 'jellyfish' ")
