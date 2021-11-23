@@ -24,14 +24,13 @@ import matplotlib.pyplot as plt
 
 
 # Same setup for Jellyfish and Fattree
-# num_servers = 686
-# num_switches = 245
-# num_ports = 14
+num_servers = 686
+num_switches = 245
+num_ports = 14
 
-
-num_servers = 16
-num_switches = 20
-num_ports = 4
+# num_servers = 16
+# num_switches = 20
+# num_ports = 4
 
 ft_topo = topo.Fattree(num_ports)
 jf_topo = topo.Jellyfish(num_servers, num_switches, num_ports)
@@ -60,12 +59,14 @@ def dijkstra(graph: Sequence[Node], origin_node: Node):
 
     while (len(unvisited) != 0):
         min_key = min(unvisited, key=lambda key: unvisited[key]["dist"])
-        # print(f"Current node: {min_key}")
+
+        # Move current node from unvisited to visited
         visited[min_key] = unvisited[min_key]
         unvisited.pop(min_key)
 
         neighbor = visited[min_key]["node"]
         dist = visited[min_key]["dist"]
+        # Update edges' dists
         for edge in neighbor.edges:
             # Find the DijkNode in unvisited that corresponds to the neighbor attached to edge
             other_node = edge.lnode if edge.lnode.id != neighbor.id else edge.rnode
@@ -73,26 +74,34 @@ def dijkstra(graph: Sequence[Node], origin_node: Node):
             unvisited_neighbor = unvisited.get(other_node.id)
             if (unvisited_neighbor is None): continue
 
-            newDist = dist + 1
-            if (newDist < unvisited_neighbor["dist"]):
-                unvisited[other_node.id]["dist"] = newDist
+            new_dist = dist + 1
+            if (new_dist < unvisited_neighbor["dist"]):
+                unvisited[other_node.id]["dist"] = new_dist
 
     return visited
 
 
-def get_path_lengths(topo):
-    """Returns the count per path length, i.e. number of times the shortest path
-    of a server pair was a certain number of hops.
+def get_count_per_path(topo):
+    """Returns the unique set of pairs per path length.
 
     Returns:
-        dict: {[path_length: int]: [count: int]}
+        dict: {
+            [path_length: int]: set(
+                    [1.1.1.1, 1.1.1.2], 
+                    [1.1.1.1, 1.1.1.3], 
+                    ...
+                )
+            }
     """
     graph = topo.servers + topo.switches
-    path_lengths = {} # in the form ["path_length": "count"]
+
+    pairs = {} # in the form ["path_length": "count"]
+    for i in range(1, 8):
+        pairs[i] = set() # ensure that only unique pairs are registered
 
     for source_server in topo.servers:
         distances = dijkstra(graph, source_server) # get shortest paths for server
-        # {"10.0.0.1": {"node": .., "dist": 2}}
+        # format: {"10.0.0.1": {"node": .., "dist": 2}}
 
         # Add only paths from source_server to another server
         for dest_server in topo.servers:
@@ -101,54 +110,40 @@ def get_path_lengths(topo):
             if distances[dest_server.id]["dist"] < 2:
                 continue
             dist = distances[dest_server.id]["dist"]
-            if (path_lengths.get(dist) is None):
-                path_lengths[dist] = 0
-            path_lengths[dist] += 1
-
-        # filter out all pairs that are not servers, i.e. filter out non-leaf nodes
-        # distances_to_servers = [distances[key] 
-        #     for key, _ in distances.items() 
-        #     if len(distances[key]["node"].edges) == 1]
-        # distances_to_servers = distances.values()
-
-        # for path in distances_to_servers:
-        #     if (path["dist"] == 0): # Skip hops to self
-        #         continue
-        #     if (path_lengths.get(path["dist"]) is None):
-        #         path_lengths[path["dist"]] = 0
-        #     path_lengths[path["dist"]] += 1
-    return path_lengths
+            pair = ((source_server.id, dest_server.id) 
+                if source_server.id < dest_server.id 
+                else (dest_server.id, source_server.id))
+            pairs[dist].update([pair])
+    return {key: len(value) for key, value in pairs.items()}
 
 
-def get_path_length_avg(topo, n_times):
-    """Run get_path_lengths n_times and return the average.
+def get_avg_count_per_path(topo, n_times):
+    """Run get_count_per_path n_times and return the average.
     """
-    sum_path_lengths = {}
-    avg_path_lengths = {}
+    sum_path_lengths = {} # {n_path: n_pairs}
+
     for _ in range(n_times):
-        path_lengths = get_path_lengths(topo)
-        for key, value in path_lengths.items():
-            if (sum_path_lengths.get(key) is None):
-                sum_path_lengths[key] = 0
-            sum_path_lengths[key] += value
-    
-    for key, value in sum_path_lengths.items():
-        avg_path_lengths[key] = int(sum_path_lengths[key] / n_times)
-    return avg_path_lengths
+        pairs = get_count_per_path(topo)
+        for n_paths, n_pairs in pairs.items():
+            if (sum_path_lengths.get(n_paths) is None):
+                sum_path_lengths[n_paths] = 0
+            sum_path_lengths[n_paths] += n_pairs
+
+    return {key:sum_n_pairs / n_times for key, sum_n_pairs in sum_path_lengths.items()}
 
 
-def normalize(path_length_data: dict, total_pairs: int) -> dict:
+def normalize(path_count: dict, total_pairs: int) -> dict:
     """Transform the count to a fraction.
 
     Args:
-        path_length_data (dict): dict: {[path_length: int]: [count: int]}
+        path_count (dict): dict: {[path_length: int]: [count: float]}}
     Returns:
         dict: dict: {[path_length: int]: [fraction: float]}
     """
     result = {}
-    for key, value in path_length_data.items():
-        print(f"value / total_pairs: {value} / {total_pairs} = {value / total_pairs}")
-        result[key] = value / total_pairs
+    for path, count in path_count.items():
+        print(f"value / total_pairs: {count} / {total_pairs} = {count / total_pairs}")
+        result[path] = count / total_pairs
     return result
 
 
@@ -206,8 +201,8 @@ def run(ft_topo, jf_topo):
     total_ft_pairs = len(get_server_pairs(ft_topo))
     total_jf_pairs = len(get_server_pairs(jf_topo))
 
-    ft_data = get_path_lengths(ft_topo)
-    jf_data = get_path_length_avg(jf_topo, 10)
+    ft_data = get_count_per_path(ft_topo)
+    jf_data = get_avg_count_per_path(jf_topo, 10)
 
     ft_normalized = normalize(ft_data, total_ft_pairs)
     jf_normalized = normalize(jf_data, total_jf_pairs)
@@ -216,12 +211,13 @@ def run(ft_topo, jf_topo):
     jf_plottable = to_plt_data(jf_normalized)
 
     draw_histogram(jf_plottable, ft_plottable)
-    (pd.DataFrame
-        .from_dict(ft_plottable, orient="index")
-        .to_csv("fattree.csv", header=False))
 
-    (pd.DataFrame
-        .from_dict(jf_plottable, orient="index")
-        .to_csv("jellyfish.csv", header=False))
+    # (pd.DataFrame
+    #     .from_dict(ft_plottable, orient="index")
+    #     .to_csv("fattree.csv", header=False))
+
+    # (pd.DataFrame
+    #     .from_dict(jf_plottable, orient="index")
+    #     .to_csv("jellyfish.csv", header=False))
 
 run(ft_topo, jf_topo)
