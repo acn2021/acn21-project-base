@@ -284,7 +284,6 @@ class Fattree:
             pod = self.Pod(aggr_switches, edge_switches)
             self.pods.append(pod)
 
-
         # Create core switches
         for host_id in range(int(k/2)):
             for switch_id in range(int(k/2)):
@@ -384,22 +383,24 @@ class Fattree:
 
         print("Successfully verified Fat-tree topology!")
 
-########################################
-######### Command line parsing #########
-########################################
 
-parser = argparse.ArgumentParser(description='Create topologies')
-parser.add_argument('topology',
-                    help='which topology to create, either "fattree" or "f" or "jellyfish" or "j"')
-parser.add_argument('--ports', default=8, help="number of ports on a switch")
+if __name__ == '__main__':
+    ########################################
+    ######### Command line parsing #########
+    ########################################
 
-args = parser.parse_args()
-is_fat_tree = args.topology == "f" or args.topology == "fattree"
-is_jellyfish = args.topology == "j" or args.topology == "jellyfish"
-if (is_fat_tree):
-    Fattree(int(args.ports))
-elif (is_jellyfish):
-    # raise NotImplementedError("Jellyfish is not implemented yet")
-    Jellyfish(16, 20, 4)
-else:
-    raise ValueError(f"Argument {args.topology} is invalid, choose 'fattree' or 'jellyfish' ")
+    parser = argparse.ArgumentParser(description='Create topologies')
+    parser.add_argument('topology',
+                        help='which topology to create, either "fattree" or "f" or "jellyfish" or "j"')
+    parser.add_argument('--ports', default=8, help="number of ports on a switch")
+
+    args = parser.parse_args()
+    is_fat_tree = args.topology == "f" or args.topology == "fattree"
+    is_jellyfish = args.topology == "j" or args.topology == "jellyfish"
+    if (is_fat_tree):
+        Fattree(int(args.ports))
+    elif (is_jellyfish):
+        # raise NotImplementedError("Jellyfish is not implemented yet")
+        Jellyfish(16, 20, 4)
+    else:
+        raise ValueError(f"Argument {args.topology} is invalid, choose 'fattree' or 'jellyfish' ")
