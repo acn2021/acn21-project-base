@@ -701,18 +701,18 @@ class Fattree:
 ########################################
 ######### Command line parsing #########
 ########################################
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Create topologies')
+    parser.add_argument('topology',
+                        help='which topology to create, either "fattree" or "f" or "jellyfish" or "j"')
+    parser.add_argument('--ports', default=8, help="number of ports on a switch")
 
-parser = argparse.ArgumentParser(description='Create topologies')
-parser.add_argument('topology',
-                    help='which topology to create, either "fattree" or "f" or "jellyfish" or "j"')
-parser.add_argument('--ports', default=8, help="number of ports on a switch")
-
-args = parser.parse_args()
-is_fat_tree = args.topology == "f" or args.topology == "fattree"
-is_jellyfish = args.topology == "j" or args.topology == "jellyfish"
-if (is_fat_tree):
-    Fattree(int(4))
-elif (is_jellyfish):
-    Jellyfish(16,20,4)
-else:
-    raise ValueError(f"Argument {args.topology} is invalid, choose 'fattree' or 'jellyfish' ")
+    args = parser.parse_args()
+    is_fat_tree = args.topology == "f" or args.topology == "fattree"
+    is_jellyfish = args.topology == "j" or args.topology == "jellyfish"
+    if (is_fat_tree):
+        Fattree(int(4))
+    elif (is_jellyfish):
+        Jellyfish(16,20,4)
+    else:
+        raise ValueError(f"Argument {args.topology} is invalid, choose 'fattree' or 'jellyfish' ")
