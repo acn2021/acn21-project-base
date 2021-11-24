@@ -570,12 +570,8 @@ class Fattree:
         self.generate(num_ports)
 
     def generate(self, num_ports: int):
-        # TODO: code for generating the fat-tree topology
-        # self._generate_switches(num_ports)
-        # self._generate_servers(num_ports)
-        # print(f"Switches: {len(self.switches)} \n Servers: {len(self.servers)} ")
-
         k = num_ports
+
         # Create pods and hosts, i.e. aggr and edge layers and hosts, with links
         for pod_number in range(k):
             aggr_switches: list[FattreeNode] = []
@@ -591,6 +587,8 @@ class Fattree:
                     self.servers.append(server)
                 aggr_switches.append(aggr_switch)
                 edge_switches.append(edge_switch)
+                self.switches.append(aggr_switch)
+                self.switches.append(edge_switch)
 
             # Add edges between switches in pod (fully connected)
             for aggr_switch in aggr_switches:
@@ -600,12 +598,12 @@ class Fattree:
             pod = self.Pod(aggr_switches, edge_switches)
             self.pods.append(pod)
 
-
         # Create core switches
         for host_id in range(int(k/2)):
             for switch_id in range(int(k/2)):
                 core_switch = FattreeNode(f"10.{k}.{host_id + 1}.{switch_id + 1}", NodeType.SWITCH, FattreeType.CORE_SWITCH)
                 self.core_switches.append(core_switch)
+                self.switches.append(core_switch)
 
         print(f"servers/hosts: {len(self.servers)}")
         print(f"core switches: {len(self.core_switches)}")
