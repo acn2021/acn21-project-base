@@ -50,6 +50,25 @@ class SPRouter(app_manager.RyuApp):
         # Switches and links in the network
         switches = get_switch(self, None)
         links = get_link(self, None)
+        switches = get_switch(self, None)
+        links = get_link(self, None)
+        switches = [switch.dp.id for switch in switches]
+        links = [(link.src.dpid, link.dst.dpid, {'port': link.src.port_no}) for link in links]
+
+        for switch in switches:
+            occupied_ports = []
+            outgoing = 0
+            for link in links:
+                if link[0] == switch:
+                    outgoing += 1
+                    occupied_ports.append(link[2]["port"])
+            if outgoing == int(self.topo_net.num_ports/2):
+                self.edge_switches.append((switch, occupied_ports.copy()))
+
+            occupied_ports.clear()
+
+        if self.initialized or not (len(links) == self.topo_net.num_ports * len(self.topo_net.switches) - self.topo_net.num_ports**2):
+            return
 
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
