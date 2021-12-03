@@ -605,8 +605,8 @@ class Fattree:
                 self.core_switches.append(core_switch)
                 self.switches.append(core_switch)
 
-        print(f"servers/hosts: {len(self.servers)}")
-        print(f"core switches: {len(self.core_switches)}")
+        # print(f"servers/hosts: {len(self.servers)}")
+        # print(f"core switches: {len(self.core_switches)}")
             
         # Add edges between core switches and pods (aggr switches)
         for pod in self.pods:
@@ -617,7 +617,7 @@ class Fattree:
                     self.core_switches[core_index].add_edge(aggr_sw)
                     core_index += 1
 
-        self._verify()
+        # self._verify()
 
 
     def _verify(self):

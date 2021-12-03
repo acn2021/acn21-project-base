@@ -34,69 +34,69 @@ from mininet.util import waitListening, custom
 import topo
 
 class FattreeNet(Topo):
-	"""
-	Create a fat-tree network in Mininet
-	"""
+    """
+    Create a fat-tree network in Mininet
+    """
 
-	def __init__(self, ft_topo):
-		
-		Topo.__init__(self)
+    def __init__(self, ft_topo):
+        
+        Topo.__init__(self)
 
-		# TODO: please complete the network generation logic here
-		BANDWIDTH = "15"
-		LATENCY = "5ms"
-		self.topo = ft_topo
-		self.edges = []
+        # TODO: please complete the network generation logic here
+        BANDWIDTH = "15"
+        LATENCY = "5ms"
+        self.topo = ft_topo
+        self.edges = []
 
-		for switch in self.topo.switches:
-			for edge in switch.edges:
-				other = edge.lnode if switch.id != edge.lnode.id else edge.rnode
-				if other == switch:
-					continue
-				if other.id < switch.id:
-					first = other.id 
-					second = switch.id
-				else:
-					first = switch.id
-					second = other.id
-				to_add = (first, second, dict(node1=first, node2=second, bw=BANDWIDTH, delay=LATENCY))
+        for switch in self.topo.switches:
+            for edge in switch.edges:
+                other = edge.lnode if switch.id != edge.lnode.id else edge.rnode
+                if other == switch:
+                    continue
+                if other.id < switch.id:
+                    first = other.id 
+                    second = switch.id
+                else:
+                    first = switch.id
+                    second = other.id
+                to_add = (first, second, dict(node1=first, node2=second, bw=BANDWIDTH, delay=LATENCY))
 
-				if to_add not in self.edges:
-					self.edges.append(to_add)
+                if to_add not in self.edges:
+                    self.edges.append(to_add)
 
-	def switches(self):
-		switchlist = []
-		for switch in self.topo.switches:
-			switchlist.append(switch.id)
-		return switchlist
-	
-	def hosts(self):
-		hostlist = []
-		for server in self.topo.servers:
-			hostlist.append(server.id)
-		return hostlist
+    def switches(self):
+        switchlist = []
+        for switch in self.topo.switches:
+            switchlist.append(switch.id)
+        return switchlist
+    
+    def hosts(self):
+        hostlist = []
+        for server in self.topo.servers:
+            hostlist.append(server.id)
+        return hostlist
 
 
 def make_mininet_instance(graph_topo):
 
-	net_topo = FattreeNet(graph_topo)
-	net = Mininet(topo=net_topo, controller=None, autoSetMacs=True)
-	net.addController('c0', controller=RemoteController, ip="127.0.0.1", port=6653)
-	return net
+    net_topo = FattreeNet(graph_topo)
+    net = Mininet(topo=net_topo, controller=None, autoSetMacs=True)
+    net.addController('c0', controller=RemoteController, ip="127.0.0.1", port=6653)
+    return net
 
 def run(graph_topo):
-	
-	# Run the Mininet CLI with a given topology
-	lg.setLogLevel('info')
-	mininet.clean.cleanup()
-	net = make_mininet_instance(graph_topo)
+    
+    # Run the Mininet CLI with a given topology
+    lg.setLogLevel('info')
+    mininet.clean.cleanup()
+    net = make_mininet_instance(graph_topo)
 
-	info('*** Starting network ***\n')
-	net.start()
-	info('*** Running CLI ***\n')
-	CLI(net)
-	info('*** Stopping network ***\n')
-	net.stop()
+    info('*** Starting network ***\n')
+    net.start()
+    info('*** Running CLI ***\n')
+    CLI(net)
+    info('*** Stopping network ***\n')
+    net.stop()
 
 
 
