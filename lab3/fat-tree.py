@@ -63,13 +63,13 @@ class FattreeNet(Topo):
 
         # Add hosts
         for server in self.topo.servers:
-            mininet_server_id = self.id_mapping.get_mininet_id(server.id)
+            mininet_server_id = self.id_mapping.get_mininet_id(server.id) # h1, h2, h3, .. h15
             self.addHost(mininet_server_id)
 
         links_to_add = []
         for switch in self.topo.switches:
             # Add switch
-            mininet_switch_id = self.id_mapping.get_mininet_id(switch.id)
+            mininet_switch_id = self.id_mapping.get_mininet_id(switch.id) # s16, s17, .. s35
 
             self.addSwitch(mininet_switch_id)
 

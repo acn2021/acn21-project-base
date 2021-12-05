@@ -59,7 +59,7 @@ class SPRouter(app_manager.RyuApp):
         # The Function get_switch(self, None) outputs the list of switches.
         self.topo_raw_switches = copy.copy(get_switch(self, None))
         # The Function get_link(self, None) outputs the list of links.
-        self.topo_raw_links = copy.copy(get_link(self, None))
+        self.topo_raw_links = copy.copy(get_link(self, None)) # (s16, s32, 3 (port))
 
         # print(" \t" + f"Current Links ({len(self.topo_raw_links)}):")
         # for l in self.topo_raw_links:
@@ -190,6 +190,7 @@ class SPRouter(app_manager.RyuApp):
         if out_port is None: # Do not forward packet
             return
 
+        # TODO: Check below until end of method out, just copy pasta from assig. 1
         actions = [parser.OFPActionOutput(out_port)]
 
         # install a flow to avoid packet_in next time
@@ -219,6 +220,7 @@ class SPRouter(app_manager.RyuApp):
             print(f"(switch: {dpid}) dst {dst} that is in mac_to_port with port {in_port}")
             out_port = self.mac_to_port[dpid][dst]
         else:
+            # TODO: Logic needed here
                 # print("unknown dst, flooding..")
             # out_port = ofproto.OFPP_FLOOD
             out_port = None
