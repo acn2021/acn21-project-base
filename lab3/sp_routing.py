@@ -31,6 +31,7 @@ from ryu.lib.packet import arp, ether_types, ethernet, ipv4, packet
 from ryu.ofproto import ofproto_v1_3
 from ryu.topology import event, switches
 from ryu.topology.api import get_link, get_switch
+import ryu.app.ofctl.api as ofctl_api
 
 import topo
 from id_mapping import IDMapping
@@ -40,12 +41,25 @@ from dijkstra import dijkstra
 class SPRouter(app_manager.RyuApp):
 
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
+    NUMBER_OF_PORTS_PER_SWITCH = 4
 
     def __init__(self, *args, **kwargs):
         super(SPRouter, self).__init__(*args, **kwargs)
-        self.topo_net = topo.Fattree(4)
+        self.topo_net = topo.Fattree(self.NUMBER_OF_PORTS_PER_SWITCH)
         self.id_mapping = IDMapping(self.topo_net)
         self.mac_to_port = {}
+        self.ip_to_port = {}  # maps the server IP to a switch port for each of the ToR switches
+
+        self.tor_switch_dpids = []  # stores the dpids of the Top of Rack switches
+        self.message_reduce_count = [0, 5000] # counter, max
+    
+    def _reduced_print(self, string: str):
+        """Prints only the 50th (message_reduce_count[1]) message, to reduce printing repeated messages.
+        """
+        self.message_reduce_count[0] += 1
+        if (self.message_reduce_count[0] > self.message_reduce_count[1]):
+            print(f"({self.message_reduce_count[1]}x)", string)
+            self.message_reduce_count[0] = 0
 
     # Topology discovery
     @set_ev_cls(event.EventSwitchEnter)
@@ -69,11 +83,23 @@ class SPRouter(app_manager.RyuApp):
         # for s in self.topo_raw_switches:
         #     print (" \t\t" + str(s))
 
-        switches = [switch.dp.id for switch in self.topo_raw_switches]
-        links = [(link.src.dpid, link.dst.dpid, {'port': link.src.port_no}) for link in self.topo_raw_links]
-        for sl in switches + links:
-            print(sl)
+        # switches = [switch.dp.id for switch in self.topo_raw_switches]
+        # links = [(link.src.dpid, link.dst.dpid, {'port': link.src.port_no}) for link in self.topo_raw_links]
+        
+        # for sl in switches + links:
+        #     print(sl)
 
+        # Obtain the dpids for ToR switches and store them
+        def _get_tor_switch_dpids():
+            link_count = {}
+            for link in self.topo_raw_links:
+                if (link_count.get(link.src.dpid) is None):
+                    link_count[link.src.dpid] = 0
+                link_count[link.src.dpid] += 1
+            max_count = max(link_count.values())
+            return [dpid for dpid, count in link_count.items() if count < max_count]
+
+        self.tor_switch_dpids = _get_tor_switch_dpids()
 
     """
     This event is fired when a switch leaves the topo. i.e. fails.
@@ -134,30 +160,6 @@ class SPRouter(app_manager.RyuApp):
         if (dst.startswith("33:33")):
             return
 
-        
-
-        # *** Algorithm
-        # Optional caching:
-        # - Check if dijkstra (shorest paths to all nodes) has already been calculated for this switch
-        #   - If not, calculate dijkstra (shortest path from this switch to all other nodes)
-        
-        # - Ping h0 to h1
-        # - Not known? ARP is flooded
-        # - ARP reply sent by correct host to its neighbor switch. This switch should use
-        #  Dijkstra to reach the requesting host h0.
-        # - Get the path to the destination from dijkstra
-        # - Obtain the next hop
-        # - Forward packet to next hop, repeat 
-        # - Install flow entry from src to dst mac over the right port
-
-        # *** ARP to obtain IP for hosts
-        """
-        1. When I do `mininet $ h0 ping h1`, an ARP request is sent to the edge switch. 
-        2. This switch broadcasts the ARP request. h1 then replies to its edge switch (the same as the edge switch
-        of h0) with its MAC address and IP.
-        3. The switch should now forward this ARP reply to the ARP request sender (h0).
-        """
-
         original_dpid = dpid
         dpid = format(datapath.id, "d").zfill(16)
         self.mac_to_port.setdefault(dpid, {})
@@ -183,27 +185,29 @@ class SPRouter(app_manager.RyuApp):
 
         # # If incoming frame is ARP, instead of IP, simply flood
         if eth.ethertype == ether_types.ETH_TYPE_ARP:
-            out_port = self._handle_arp_packet(dpid, pkt, src, dst, in_port, original_dpid, ofproto)
+            out_port = self._handle_arp_packet(dpid, pkt, src, dst, in_port, original_dpid, ofproto, parser, msg)
         else:
-            out_port = self._handle_packet(dpid, src, dst, in_port)
+            out_port = self._handle_packet(dpid, src, dst, in_port, ofproto, original_dpid)
         
         if out_port is None: # Do not forward packet
             return
 
-        # TODO: Check below until end of method out, just copy pasta from assig. 1
         actions = [parser.OFPActionOutput(out_port)]
 
+        # TODO: Check flow related stuff below until end of method, since its just a copy pasta from assig. 1
         # install a flow to avoid packet_in next time
-        if out_port != ofproto.OFPP_FLOOD:
-            match = parser.OFPMatch(in_port=in_port, eth_dst=dst)
-            # verify if we have a valid buffer_id, if yes avoid to send both
-            # flow_mod & packet_out
-            if msg.buffer_id != ofproto.OFP_NO_BUFFER:
-                self.add_flow(datapath, 1, match, actions, msg.buffer_id)
-                return
-            else:
-                self.add_flow(datapath, 1, match, actions)
-            print(f"Added flow in_port|dst_mac->out_port = {in_port}|{dst}->{out_port}")
+        # if out_port != ofproto.OFPP_FLOOD:
+        #     match = parser.OFPMatch(in_port=in_port, eth_dst=dst)
+        #     # verify if we have a valid buffer_id, if yes avoid to send both
+        #     # flow_mod & packet_out
+        #     if msg.buffer_id != ofproto.OFP_NO_BUFFER:
+        #         self.add_flow(datapath, 1, match, actions, msg.buffer_id)
+        #         return
+        #     else:
+        #         self.add_flow(datapath, 1, match, actions)
+        #     print(f"Added flow in_port|dst_mac->out_port = {in_port}|{dst}->{out_port}")
+
+        # Send packet through out_port
         data = None
         if msg.buffer_id == ofproto.OFP_NO_BUFFER:
             data = msg.data
@@ -212,79 +216,85 @@ class SPRouter(app_manager.RyuApp):
                                   in_port=in_port, actions=actions, data=data)
         datapath.send_msg(out)
 
-    def _handle_packet(self, dpid, src, dst, in_port):
-        # learn a mac address to avoid FLOOD next time.
-        self.mac_to_port[dpid][src] = in_port
-            # self.logger.info("IP packet in \tsw: %s src: %s dst: %s in_port: %s", dpid, src, dst, in_port)
-        if dst in self.mac_to_port[dpid]:
-            print(f"(switch: {dpid}) dst {dst} that is in mac_to_port with port {in_port}")
-            out_port = self.mac_to_port[dpid][dst]
-        else:
-            # TODO: Logic needed here
-                # print("unknown dst, flooding..")
-            # out_port = ofproto.OFPP_FLOOD
-            out_port = None
+    def _handle_packet(self, dpid, src, dst, in_port, ofproto, original_dpid):
+        self._reduced_print("Handling non-ARP packet.")
+
+        self._reduced_print(f"IP packet in \tsw: {dpid} src: {src} dst: {dst} in_port: {in_port}")
+        # TODO: Logic needed here
+
+        # if dst in self.mac_to_port[dpid]:
+        #     print(f"(switch: {dpid}) dst {dst} that is in mac_to_port with port {in_port}")
+        #     out_port = self.mac_to_port[dpid][dst]
+        # else:
+        out_port = None
         return out_port
 
-    def _handle_arp_packet(self, dpid, pkt, src, dst, in_port, original_dpid, ofproto):
-        # print("ARP packet discovered, flooding..")
-        
-        # Assume arp request
-        # if (dst == "ff:ff:ff:ff:ff:ff"):
-        #     # out_port = ofproto.OFPP_FLOOD
-
-        #     # Store mac to port mapping
-        #     self.mac_to_port[dpid][src] = in_port
-
-        #     # We should never flood on ARPs, because of loops in the topo. 
-        #     # We do not need to flood though since we have get_links and dijkstra for discovery.
-
-        #     # Get out port from dijkstra
-        #     pkt_arp = pkt.get_protocol(arp.arp)
-
-        #     ip_of_requestor = pkt_arp.src_ip
-        #     node_id_of_requestor = self.id_mapping.get_node_id_from_ip(ip_of_requestor)
-        #     next_hop = self._get_next_hop_to_dest(original_dpid, node_id_of_requestor)
-        #     next_hop_dpid = self.id_mapping.get_dpid(next_hop['node'].id)
-        #     port = self._find_port_of_next_hop(original_dpid, next_hop_dpid)
-
-        #     out_port = port or ofproto.OFPP_FLOOD
-        # else: # ARP is reply
-        #     # Get target IP
-        #     pkt_arp = pkt.get_protocol(arp.arp)
-        #     print(pkt_arp.__dict__)
-        #     if (pkt_arp.opcode == 2): # Verify it is indeed an ARP reply
-        #         ip_of_requestor = pkt_arp.src_ip # get IP of host that did ARP request
-        #         # mac_of_requestor = pkt_arp.src_mac # get IP of host that did ARP request
-        #         node_id_of_requestor = self.id_mapping.get_node_id_from_ip(ip_of_requestor)
-                
-        #         next_hop = self._get_next_hop_to_dest(original_dpid, node_id_of_requestor)
-
-
-        #         print(f"next hop node id: {next_hop['node'].id} "
-        #             + f"- next hop ip: {self.id_mapping.get_ip(next_hop['node'].id)}")
-        #         next_hop_dpid = self.id_mapping.get_dpid(next_hop['node'].id)
-        #         # Find port of next hop
-        #         port = self._find_port_of_next_hop(original_dpid, next_hop_dpid)
-
-        # out_port = ofproto.OFPP_FLOOD
-
-        # Store mac to port mapping
-        self.mac_to_port[dpid][src] = in_port
-
-        # *** A note of ARP flooding:
-        # We should never completely flood on ARPs, because of loops in the topo.
-        # We can however flood on an edge node that has an ARP packet incoming from the pod.
-        # We do not need to flood on the rest of the net,since we have get_links and dijkstra for discovery.
+    def _handle_arp_packet(self, dpid, pkt, src, dst, in_port, original_dpid, ofproto, parser, msg):
+        print("\n***Handling ARP packet.")
 
         ip_of_requestor = pkt.get_protocol(arp.arp).src_ip
-        node_id_of_requestor = self.id_mapping.get_node_id_from_ip(ip_of_requestor)
-        next_hop = self._get_next_hop_to_dest(original_dpid, node_id_of_requestor)
-        next_hop_dpid = self.id_mapping.get_dpid(next_hop['node'].id)
-        port = self._find_port_of_next_hop(original_dpid, next_hop_dpid)
+        dst_ip = pkt.get_protocol(arp.arp).dst_ip
 
-        out_port = port or ofproto.OFPP_FLOOD
-        return out_port
+        # 1. Identify if current switch is ToR switch
+        if (original_dpid in self.tor_switch_dpids):
+            # print(f"ToR switch {dpid} ({self.id_mapping.get_node_id_from_dpid(original_dpid)}) received packet")
+            print(f"switch: {dpid} (nodeid: {self.id_mapping.get_node_id_from_dpid(original_dpid)}) src: {src} dst: {dst} in_port: {in_port}")
+            # (a) If so, store entry in ip_to_port
+            self.ip_to_port.setdefault(original_dpid, {})
+            self.ip_to_port[original_dpid][ip_of_requestor] = in_port
+            
+            print("***ip to port:")
+            for ip, port in self.ip_to_port.items():
+                print(f"switch:{ip}\t-\tip:port{port}")
+
+        # 2. Look up in ip_to_port
+        _ = self.ip_to_port.get(original_dpid)
+        out_port = _ and _.get(dst_ip)
+
+        # (a) If found, do the OFPPacketOut with the ARP packet to the switch on the port found in the table with OFPActionOutput
+        if (out_port):
+            print("####out_port found from existing ip_to_port mapping")
+            print(f"out_port: {out_port}")
+            return out_port
+
+        # (b) If not found, flood ARP packet to all servers (not switches) by looping over ToR switches' ports that face servers
+        for tor_dpid in self.tor_switch_dpids:
+            ports_facing_servers = self._get_ports_facing_servers(tor_dpid)
+
+            for server_facing_port in ports_facing_servers:
+                # Send packet to server facing port at switch with tor_dpid
+                datapath = ofctl_api.get_datapath(self, dpid=tor_dpid)
+                actions = [parser.OFPActionOutput(server_facing_port)]
+                data = None
+                if msg.buffer_id == ofproto.OFP_NO_BUFFER:
+                    data = msg.data
+                out = parser.OFPPacketOut(
+                    datapath=datapath, 
+                    buffer_id=msg.buffer_id,
+                    in_port=in_port, 
+                    actions=actions, 
+                    data=data)
+                datapath.send_msg(out)
+
+
+        # Old stuff for reference
+        
+        # ip_of_requestor = pkt.get_protocol(arp.arp).src_ip
+        # node_id_of_requestor = self.id_mapping.get_node_id_from_ip(ip_of_requestor)
+        # next_hop = self._get_next_hop_to_dest(original_dpid, node_id_of_requestor)
+        # next_hop_dpid = self.id_mapping.get_dpid(next_hop['node'].id)
+        # server_facing_port = self._find_port_of_next_hop(original_dpid, next_hop_dpid)
+
+        return None
+
+    def _get_ports_facing_servers(self, dpid: str):
+        possible_ports = range(1, self.NUMBER_OF_PORTS_PER_SWITCH)
+        ports_facing_switches = []
+
+        for link in self.topo_raw_links:
+            if (link.src.dpid == dpid):
+                ports_facing_switches.append(link.src.port_no)
+        return [port for port in possible_ports if port not in ports_facing_switches]
 
     def _get_next_hop_to_dest(self, dpid_of_this_switch: str, destination_node_id: str) -> dict:
         graph = self.topo_net.servers + self.topo_net.switches
