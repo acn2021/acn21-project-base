@@ -17,29 +17,23 @@
 
 #!/usr/bin/env python3
 
-from id_mapping import IDMapping
-from ryu.base import app_manager
-from ryu.controller import mac_to_port
-from ryu.controller import ofp_event
-from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER, DEAD_DISPATCHER
-from ryu.controller.handler import set_ev_cls
-from ryu.ofproto import ofproto_v1_3
-from ryu.lib.mac import haddr_to_bin
-from ryu.lib.packet import packet
-from ryu.lib.packet import ipv4
-from ryu.lib.packet import arp
-from ryu.lib.packet import ethernet
-from ryu.lib.packet import ether_types
+import copy
+from datetime import datetime
 
-
-from ryu.topology import event, switches
-from ryu.topology.api import get_switch, get_link
 from ryu.app.wsgi import ControllerBase
+from ryu.base import app_manager
+from ryu.controller import mac_to_port, ofp_event
+from ryu.controller.handler import (CONFIG_DISPATCHER, DEAD_DISPATCHER,
+                                    MAIN_DISPATCHER, set_ev_cls)
+from ryu.lib.mac import haddr_to_bin
+from ryu.lib.packet import arp, ether_types, ethernet, ipv4, packet
+from ryu.ofproto import ofproto_v1_3
+from ryu.topology import event, switches
+from ryu.topology.api import get_link, get_switch
 
 import topo
-import copy
+from id_mapping import IDMapping
 
-from datetime import datetime
 
 class FTRouter(app_manager.RyuApp):
     """
@@ -75,6 +69,7 @@ class FTRouter(app_manager.RyuApp):
         super(FTRouter, self).__init__(*args, **kwargs)
         self.topo_net = topo.Fattree(4)
         self.id_mapping = IDMapping(self.topo_net)
+        self.mac_to_port = {}
 
     # Topology discovery
     @set_ev_cls(event.EventSwitchEnter)
@@ -91,13 +86,13 @@ class FTRouter(app_manager.RyuApp):
         # The Function get_link(self, None) outputs the list of links.
         self.topo_raw_links = copy.copy(get_link(self, None))
 
-        print(" \t" + f"Current Links ({len(self.topo_raw_links)}):")
-        for l in self.topo_raw_links:
-            print (" \t\t" + str(l))
+        # print(" \t" + f"Current Links ({len(self.topo_raw_links)}):")
+        # for l in self.topo_raw_links:
+        #     print (" \t\t" + str(l))
 
-        print(" \t" + f"Current Switches ({len(self.topo_raw_switches)}):")
-        for s in self.topo_raw_switches:
-            print (" \t\t" + str(s))
+        # print(" \t" + f"Current Switches ({len(self.topo_raw_switches)}):")
+        # for s in self.topo_raw_switches:
+        #     print (" \t\t" + str(s))
 
         # switches = [switch.dp.id for switch in self.topo_raw_switches]
         # links = [(link.src.dpid, link.dst.dpid, {'port': link.src.port_no}) for link in self.topo_raw_links]
@@ -153,6 +148,10 @@ class FTRouter(app_manager.RyuApp):
         pkt = packet.Packet(msg.data)
         eth = pkt.get_protocols(ethernet.ethernet)[0]
 
+        if eth.ethertype == ether_types.ETH_TYPE_LLDP:
+            # ignore lldp packet
+            return
+
         dst = eth.dst
         src = eth.src
 
@@ -160,11 +159,48 @@ class FTRouter(app_manager.RyuApp):
         if (dst.startswith("33:33")):
             return
 
-        # print(
-        #     f"{FTRouter.get_time()} - Packet:"
-        #     + f"\n\tARP?: {'true' if (eth.ethertype == ether_types.ETH_TYPE_ARP) else 'false'}"
-        #     + f"\n\tIP packet - switch: {dpid} src: {src} dst: {dst} in_port: {in_port}"
-        # )
+        # dpid = format(datapath.id, "d").zfill(16)
+        self.mac_to_port.setdefault(dpid, {})
+
+        print(
+            f"{FTRouter.get_time()} - Packet:"
+            + f"\n\tARP?: {'true' if (eth.ethertype == ether_types.ETH_TYPE_ARP) else 'false'}"
+            + f"\n\tIP packet - switch: {dpid} ({self.id_mapping.get_node_id_from_dpid(dpid)}) src: {src} dst: {dst} in_port: {in_port}"
+        )
+
+        # learn a mac address to avoid FLOOD next time.
+        self.mac_to_port[dpid][src] = in_port
+        self.logger.info("IP packet in \tsw: %s src: %s dst: %s in_port: %s", dpid, src, dst, in_port)
+        if dst in self.mac_to_port[dpid]:
+            print(f"dst {dst} that is in mac_to_port with port {in_port}")
+            out_port = self.mac_to_port[dpid][dst]
+        else:
+            print("unknown dst, flooding..")
+            out_port = ofproto.OFPP_FLOOD
+
+
+
+
+        actions = [parser.OFPActionOutput(out_port)]
+
+        # install a flow to avoid packet_in next time
+        if out_port != ofproto.OFPP_FLOOD:
+            match = parser.OFPMatch(in_port=in_port, eth_dst=dst)
+            # verify if we have a valid buffer_id, if yes avoid to send both
+            # flow_mod & packet_out
+            if msg.buffer_id != ofproto.OFP_NO_BUFFER:
+                self.add_flow(datapath, 1, match, actions, msg.buffer_id)
+                return
+            else:
+                self.add_flow(datapath, 1, match, actions)
+            print(f"Added flow in_port|dst_mac->out_port = {in_port}|{dst}->{out_port}")
+        data = None
+        if msg.buffer_id == ofproto.OFP_NO_BUFFER:
+            data = msg.data
+
+        out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
+                                  in_port=in_port, actions=actions, data=data)
+        datapath.send_msg(out)
 
     @staticmethod
     def get_time():
