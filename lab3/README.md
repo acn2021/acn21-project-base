@@ -6,7 +6,7 @@
 # Start VM
 vagrant ssh
 
-# Run
+# Create mininet topology
 cd lab3
 ./run.sh
 ```

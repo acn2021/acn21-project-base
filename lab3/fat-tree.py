@@ -20,6 +20,7 @@
 import os
 import subprocess
 import time
+from id_mapping import IDMapping
 
 import mininet
 import mininet.clean
@@ -46,9 +47,8 @@ class FattreeNet(Topo):
         BANDWIDTH = "15"
         LATENCY = "5ms"
         self.topo = ft_topo
-        self.links_to_add = []
+        self.id_mapping = IDMapping(self.topo)
 
-        # self._populate_edges(BANDWIDTH, LATENCY)
         self._create_topology(BANDWIDTH, LATENCY)
 
     def _create_topology(self, link_bw, link_delay):
@@ -63,11 +63,15 @@ class FattreeNet(Topo):
 
         # Add hosts
         for server in self.topo.servers:
-            self.addHost(server.id)
-        
+            mininet_server_id = self.id_mapping.get_mininet_id(server.id)
+            self.addHost(mininet_server_id)
+
+        links_to_add = []
         for switch in self.topo.switches:
             # Add switch
-            self.addSwitch(switch.id)
+            mininet_switch_id = self.id_mapping.get_mininet_id(switch.id)
+
+            self.addSwitch(mininet_switch_id)
 
             """ Add links to intermediate `links_to_add` list, so we can first add 
             all switches and check on duplicate links and to avoid errors being 
@@ -75,29 +79,36 @@ class FattreeNet(Topo):
             """
             for edge in switch.edges:
                 other_node = edge.lnode if switch.id != edge.lnode.id else edge.rnode
-                if other_node == switch:
+                
+                if other_node == switch: # links with self, ignore
                     continue
+
+                # Ensure that no duplicate links are added, but in reverse order
+                # e.g. (1, 2) and (2, 1) should not both be added
                 if other_node.id < switch.id:
                     first_node_ip = other_node.id 
                     second_node_ip = switch.id
                 else:
                     first_node_ip = switch.id
                     second_node_ip = other_node.id
-                    
-                to_add = (first_node_ip, second_node_ip, dict(node1=first_node_ip, node2=second_node_ip, bw=link_bw, delay=link_delay))
 
-                if to_add not in self.links_to_add:
-                    self.links_to_add.append(to_add)
+                to_add = (first_node_ip, second_node_ip)
+
+                if to_add not in links_to_add:
+                    links_to_add.append(to_add)
+
+        print(self.id_mapping)
 
         # Now that all hosts and switches are added to the topo, add links 
         # from `links_to_add` to the mininet topo links
-        for link in self.links_to_add:
-            data = link[2]
+        for link in links_to_add:
+            mininet_node_id_1 = self.id_mapping.get_mininet_id(link[0])
+            mininet_node_id_2 = self.id_mapping.get_mininet_id(link[1])
             self.addLink(
-                node1=data['node1'],
-                node2=data['node2'],
-                bw=data['bw'],
-                delay=data['delay'],
+                node1=mininet_node_id_1,
+                node2=mininet_node_id_2,
+                bw=link_bw,
+                delay=link_delay
             )
 
 
@@ -108,6 +119,7 @@ def make_mininet_instance(graph_topo):
     net = Mininet(topo=net_topo, controller=None, autoSetMacs=True)
     net.addController('c0', controller=RemoteController, ip="127.0.0.1", port=6653)
     return net
+
 
 def run(graph_topo):
     
@@ -122,7 +134,6 @@ def run(graph_topo):
     CLI(net)
     info('*** Stopping network ***\n')
     net.stop()
-
 
 
 ft_topo = topo.Fattree(4)
