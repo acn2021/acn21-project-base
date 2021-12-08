@@ -17,194 +17,87 @@
 
 #!/usr/bin/env python3
 
-import copy
-from datetime import datetime
-
-from ryu.app.wsgi import ControllerBase
-from ryu.base import app_manager
-from ryu.controller import mac_to_port, ofp_event
-from ryu.controller.handler import (CONFIG_DISPATCHER, DEAD_DISPATCHER,
-                                    MAIN_DISPATCHER, set_ev_cls)
-from ryu.lib.mac import haddr_to_bin
-from ryu.lib.packet import arp, ether_types, ethernet, ipv4, packet
-from ryu.ofproto import ofproto_v1_3
-from ryu.topology import event, switches
-from ryu.topology.api import get_link, get_switch
+from typing import Dict, List
+from sp_routing import SPRouter
 
 import topo
 from id_mapping import IDMapping
+from address import Address
+from switch_routing_tables import SwitchRoutingTables
+from ryu.topology.api import get_link
+from ryu.controller.handler import set_ev_cls
+from typing import Optional
+from ryu.base import app_manager
+from ryu.controller import mac_to_port
+from ryu.controller import ofp_event
+from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER
+from ryu.controller.handler import set_ev_cls
+from ryu.ofproto import ofproto_v1_3
+from ryu.lib.mac import haddr_to_bin
+from ryu.lib.packet import packet, ethernet, ether_types
+from ryu.lib.packet import ipv4
+from ryu.lib.packet import arp
+
+from ryu.topology import event, switches
+from ryu.topology.api import get_switch, get_link
+from ryu.app.wsgi import ControllerBase
 
 
-class FTRouter(app_manager.RyuApp):
-    """
-    ## Core switches
-      - terminating first-level prefixes for all pods (10.pod.0.0/16, port)
-
-    ## Pod switches
-
-    ### aggr switches: 
-      - destination subnet switch prefix (10.pod.switch.0/24, port)
-
-    ### edge switch:
-      - ..
-
-
-    How to solve the problem in steps:
-
-    1. Find a way to map Fattree node ID to Mininet id and Ryu dpid.
-        To solve this, I created a data structure IDMapping, that stores
-        for each node its:
-            - Mininet name, e.g. h1 for hosts or s1 for switches
-            - Its Fattree address, e.g. 10.0.1.2 for hosts or 10.4.1.1 for core switches
-        You can then query this data structure to convert between Mininet-name/Fattree-address/dpid.
-
-    2. Obtain port mapping from switches to switches via topology discovery API
-    3. Obtain port mapping from switches to servers via ARP
-
-    """
-
-    OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
+class FTRouter(SPRouter):
 
     def __init__(self, *args, **kwargs):
-        super(FTRouter, self).__init__(*args, **kwargs)
-        self.topo_net = topo.Fattree(4)
-        self.id_mapping = IDMapping(self.topo_net)
-        self.mac_to_port = {}
+        super().__init__(*args, **kwargs)
+        self.switch_routing_tables = SwitchRoutingTables(4)
+
 
     # Topology discovery
     @set_ev_cls(event.EventSwitchEnter)
     def get_topology_data(self, ev):
-        print("*** Switch has entered topo, running get_topology_data()")
-        self.logger.info("*** testing logger")
-
-        # Switches and links in the network
-        # switches = get_switch(self, None)
-        # links = get_link(self, None)
-
-        # The Function get_switch(self, None) outputs the list of switches.
-        self.topo_raw_switches = copy.copy(get_switch(self, None))
-        # The Function get_link(self, None) outputs the list of links.
-        self.topo_raw_links = copy.copy(get_link(self, None))
-
-        # print(" \t" + f"Current Links ({len(self.topo_raw_links)}):")
-        # for l in self.topo_raw_links:
-        #     print (" \t\t" + str(l))
-
-        # print(" \t" + f"Current Switches ({len(self.topo_raw_switches)}):")
-        # for s in self.topo_raw_switches:
-        #     print (" \t\t" + str(s))
-
-        # switches = [switch.dp.id for switch in self.topo_raw_switches]
-        # links = [(link.src.dpid, link.dst.dpid, {'port': link.src.port_no}) for link in self.topo_raw_links]
-        # for sl in switches + links:
-        #     print(sl)
+        super().get_topology_data(ev)
+        # links = [(link.src.dpid, link.dst.dpid, {'port': link.src.port_no}) for link in get_link(self, None)]
+        # links = []
+        self.switch_routing_tables.sync_ports(self.raw_links, self.id_mapping)
 
 
-    """
-    This event is fired when a switch leaves the topo. i.e. fails.
-    """
-    @set_ev_cls(event.EventSwitchLeave, [MAIN_DISPATCHER, CONFIG_DISPATCHER, DEAD_DISPATCHER])
-    def handler_switch_leave(self, ev):
-        print("Switch left topo.")
+    # @override
+    def get_port_of_next_hop(self, dst, src_dpid, dst_dpid):
+        src_node_id = self.id_mapping.get_node_id_from_dpid(src_dpid)
+        dst_node_id = self.id_mapping.get_node_id_from_dpid(dst_dpid)
 
-    @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
-    def switch_features_handler(self, ev):
-        print("switch_features_handler called from event: ofp_event.EventOFPSwitchFeatures")
-        datapath = ev.msg.datapath
-        ofproto = datapath.ofproto
-        parser = datapath.ofproto_parser
+        self.switch_routing_tables.prefix_tables[src_node_id]
+        
+        port_of_next_hop = self.switch_routing_tables.lookup_port(src_node_id, dst_node_id)
 
-        # Install entry-miss flow entry
-        match = parser.OFPMatch()
-        actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
-                                          ofproto.OFPCML_NO_BUFFER)]
-        self.add_flow(datapath, 0, match, actions)
+        return port_of_next_hop
+        print(f"Port for next hop: {port}")
+        next_hop_dpid = self._get_neighbor_by_port(src_dpid, port)
+        return self.id_mapping.get_dpid(next_hop_dpid)
 
-    # Add a flow entry to the flow-table
-    def add_flow(self, datapath, priority, match, actions):
-        ofproto = datapath.ofproto
-        parser = datapath.ofproto_parser
+    def _get_neighbor_by_port(self, src_dpid, port):
+        print(f"src_dpid {src_dpid}")
+        print(f"port: {port}")
+        for link in self.raw_links:
+            print(link)
+            if link[0] == src_dpid and link[2]['port'] == port:
+                print(f"result + {link[1]}")
+                return link[1]
+        # Get fattree node ids
+        # src_node_id = self.id_mapper.get_node_id_from_dpid(src_dpid)
+        # dst_node_id = self.id_mapper.get_node_id_from_dpid(dst_dpid)
 
-        # Construct flow_mod message and send it
-        inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
-        mod = parser.OFPFlowMod(datapath=datapath, priority=priority,
-                                match=match, instructions=inst)
-        datapath.send_msg(mod)
+        # src_octets = src_node_id.split(".")
+        # dst_octets = dst_node_id.split(".")
 
-    @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
-    def _packet_in_handler(self, ev):
-        if ev.msg.msg_len < ev.msg.total_len:
-            self.logger.debug("packet truncated: only %s of %s bytes",
-                              ev.msg.msg_len, ev.msg.total_len)
-        msg = ev.msg
-        datapath = msg.datapath
-        dpid = datapath.id
-        ofproto = datapath.ofproto
-        parser = datapath.ofproto_parser
-        # TODO: handle new packets at the controller
+        # # Routing for core switch on /16 prefix
+        # is_core_switch = src_octets[1] == 4
+        # if (is_core_switch):
+        #     for (other_dpid, port_no) in self.raw_links[src_dpid]:
+        #         # match outgoing link dpid to /16 prefix
+        #         other_node_id = self.id_mapper.get_node_id_from_dpid(other_dpid)
+        #         other_octets = other_node_id.split(".")
+        #         if (dst_octets[1] == other_node_id[1]): # [1] is the second octet, i.e. /16 prefix
+        #             return other_dpid
+        # else:
+        #     pass
+        
 
-        in_port = msg.match['in_port']
-
-        pkt = packet.Packet(msg.data)
-        eth = pkt.get_protocols(ethernet.ethernet)[0]
-
-        if eth.ethertype == ether_types.ETH_TYPE_LLDP:
-            # ignore lldp packet
-            return
-
-        dst = eth.dst
-        src = eth.src
-
-        # If IPv6 multicast, ignore packet
-        if (dst.startswith("33:33")):
-            return
-
-        # dpid = format(datapath.id, "d").zfill(16)
-        self.mac_to_port.setdefault(dpid, {})
-
-        print(
-            f"{FTRouter.get_time()} - Packet:"
-            + f"\n\tARP?: {'true' if (eth.ethertype == ether_types.ETH_TYPE_ARP) else 'false'}"
-            + f"\n\tIP packet - switch: {dpid} ({self.id_mapping.get_node_id_from_dpid(dpid)}) src: {src} dst: {dst} in_port: {in_port}"
-        )
-
-        # learn a mac address to avoid FLOOD next time.
-        self.mac_to_port[dpid][src] = in_port
-        self.logger.info("IP packet in \tsw: %s src: %s dst: %s in_port: %s", dpid, src, dst, in_port)
-        if dst in self.mac_to_port[dpid]:
-            print(f"dst {dst} that is in mac_to_port with port {in_port}")
-            out_port = self.mac_to_port[dpid][dst]
-        else:
-            print("unknown dst, flooding..")
-            out_port = ofproto.OFPP_FLOOD
-
-
-
-
-        actions = [parser.OFPActionOutput(out_port)]
-
-        # install a flow to avoid packet_in next time
-        if out_port != ofproto.OFPP_FLOOD:
-            match = parser.OFPMatch(in_port=in_port, eth_dst=dst)
-            # verify if we have a valid buffer_id, if yes avoid to send both
-            # flow_mod & packet_out
-            if msg.buffer_id != ofproto.OFP_NO_BUFFER:
-                self.add_flow(datapath, 1, match, actions, msg.buffer_id)
-                return
-            else:
-                self.add_flow(datapath, 1, match, actions)
-            print(f"Added flow in_port|dst_mac->out_port = {in_port}|{dst}->{out_port}")
-        data = None
-        if msg.buffer_id == ofproto.OFP_NO_BUFFER:
-            data = msg.data
-
-        out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
-                                  in_port=in_port, actions=actions, data=data)
-        datapath.send_msg(out)
-
-    @staticmethod
-    def get_time():
-        now = datetime.now()
-
-        current_time = now.strftime("%H:%M:%S")
-        return current_time

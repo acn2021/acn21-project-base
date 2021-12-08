@@ -17,6 +17,7 @@
 
 #!/usr/bin/env python3
 
+from typing import Optional
 from ryu.base import app_manager
 from ryu.controller import mac_to_port
 from ryu.controller import ofp_event
@@ -35,6 +36,7 @@ from ryu.app.wsgi import ControllerBase
 from kruskal import kruskal
 
 import topo
+from id_mapping import IDMapping
 
 class SPRouter(app_manager.RyuApp):
 
@@ -51,6 +53,7 @@ class SPRouter(app_manager.RyuApp):
         self.ipv4_dests = dict()
         self.custom_topo = None
         self.raw_links = []
+        self.id_mapping = IDMapping(self.topo_net)
 
     # Topology discovery
     @set_ev_cls(event.EventSwitchEnter)
@@ -73,7 +76,6 @@ class SPRouter(app_manager.RyuApp):
         def find_edge_switches(switches, links):
             edge_switches = []
             for switch in switches:
-                print(f"sw{switch}")
                 occupied_ports = []
                 outgoing = 0
                 for link in links:
@@ -119,7 +121,7 @@ class SPRouter(app_manager.RyuApp):
                     self.flood_ports_switches[str(switch)].append({'port': i})
 
         self.initialized = True
-        print("Controller initialized...")
+        print("Controller initialized")
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -133,6 +135,38 @@ class SPRouter(app_manager.RyuApp):
                                           ofproto.OFPCML_NO_BUFFER)]
         self.add_flow(datapath, 0, match, actions)
 
+    def get_next_hop_dpid(self, src_dpid: str, dst_dpid: str) -> Optional[int]:
+        """Obtain a path (in this cast using a shortest path algorithm) from 
+        the source dpid to the destination dpid.
+
+        Args:
+            src_dpid (str): dpid of source
+            dst_dpid (str): dpid of destination
+
+        Returns:
+            [type]: [description]
+        """
+        path = self._construct_shortest_path(src_dpid, dst_dpid)
+        print("path:")
+        print(path)
+        if len(path) == 0:
+            return None
+        return path[1]
+
+    # TODO: Check if we flood too many ports, since I think we need to 
+    # only flood edge ports to servers?
+
+    # Sample output:
+    # flood_port for sw 17: 4
+    # flood_port for sw 17: 3
+    # flood_port for sw 18: 2
+    # flood_port for sw 18: 4
+    # flood_port for sw 35: 2
+    # flood_port for sw 35: 4
+    # flood_port for sw 35: 3 <-- sw 35 has one too many
+    # flood_port for sw 19: 1
+    # flood_port for sw 19: 3
+    # flood_port for sw 19: 4 <-- sw 19 has one too many
     def _get_flooding_ports(self, dpid, port_in):
         flood_ports = []
         raw = self.flood_ports_switches[str(dpid)]
@@ -143,6 +177,8 @@ class SPRouter(app_manager.RyuApp):
         return flood_ports
 
     def _construct_shortest_path(self, src_dpid, dst_dpid):
+        """Path as list of ids to follow
+        """
         if src_dpid == dst_dpid:
             return []
         src = None
@@ -187,7 +223,6 @@ class SPRouter(app_manager.RyuApp):
         dpid = datapath.id
         self.mac_to_port.setdefault(dpid, {})
 
-
         # Parsing the data into a packet
         pkt = packet.Packet(msg.data)
 
@@ -206,20 +241,11 @@ class SPRouter(app_manager.RyuApp):
             src = ip_pkt.src
             dst = ip_pkt.dst
 
-        print(f"arp_pkt: {arp_pkt} ")
-        print(f"ip_pkt: {ip_pkt} ")
-        print(f"src: {src} - dst: {dst}\n")
-
         ##### Shortest Path Routing #####
 
         # Add to IP table
-        # if not src in self.ipv4_dests:
-        self.ipv4_dests[src] = (dpid, in_port)
-        
-        # for k, (dpid, port) in self.ipv4_dests.items():
-        #     print(f"src:{k}: (dpid: {dpid}, port: {port}")
-
-        # print("****")
+        if not src in self.ipv4_dests:
+            self.ipv4_dests[src] = (dpid, in_port)
         
         # Find next switch to be reached and add to flowtable of the switch
         destination_can_be_reached = dst in self.ipv4_dests
@@ -227,20 +253,13 @@ class SPRouter(app_manager.RyuApp):
             # Calculate path between dpids
             src_dpid = dpid
             dst_dpid = self.ipv4_dests[dst][0]
-            path = self._construct_shortest_path(src_dpid, dst_dpid)
 
-            # Determine out_port
-            if len(path) == 0:
-                # At destination switch, do lookup of port to destination IP/server
-                out_port = self.ipv4_dests[dst][1]
-            else:
-                # Not at destination switch yet, find port of next hop
-                dst_dpid = path[1]
-                out_port = self._get_out_port(src_dpid, dst_dpid)
+            out_port = self.get_port_of_next_hop(dst, src_dpid, dst_dpid)
 
             # Add flow from src IP to dst IP when at this switch
             match = parser.OFPMatch(in_port=in_port, ipv4_dst=dst, ipv4_src=src)
             actions = [parser.OFPActionOutput(out_port)]
+            print(f"Adding flow, dst: {dst} - src: {src} - in_port: {in_port} - out_port: {out_port}")
             self.add_flow(datapath, 1, match, actions)
 
             data = msg.data
@@ -255,7 +274,7 @@ class SPRouter(app_manager.RyuApp):
             actions = []
             out_ports = self._get_flooding_ports(dpid, in_port)
             for port in out_ports:
-                print(f"flood_port for sw {dpid}: {port}")
+                # print(f"flood_port for sw {dpid}: {port}")
                 actions.append(parser.OFPActionOutput(port))
 
             match = parser.OFPMatch(in_port=in_port, ipv4_dst=dst, ipv4_src=src)
@@ -267,6 +286,24 @@ class SPRouter(app_manager.RyuApp):
             out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
                                     in_port=in_port, actions=actions, data=data)
             datapath.send_msg(out)
+
+    def get_port_of_next_hop(self, dst, src_dpid, dst_dpid):
+        next_hop_dpid = self.get_next_hop_dpid(src_dpid, dst_dpid)
+
+        print("******** PATH")
+        print(next_hop_dpid)
+        print(self.id_mapping.get_node_id_from_dpid(next_hop_dpid))
+                
+
+            # Determine out_port
+        if next_hop_dpid is None:
+                # At destination switch, do lookup of port to destination IP/server
+            out_port = self.ipv4_dests[dst][1]
+        else:
+                # Not at destination switch yet, find port of next hop
+            dst_dpid = next_hop_dpid
+            out_port = self._get_out_port(src_dpid, dst_dpid)
+        return out_port
 
 
     def _get_out_port(self, src_dpid, dst_dpid):
