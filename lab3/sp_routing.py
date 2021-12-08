@@ -61,35 +61,46 @@ class SPRouter(app_manager.RyuApp):
         links = get_link(self, None)
         switches = [switch.dp.id for switch in switches]
         links = [(link.src.dpid, link.dst.dpid, {'port': link.src.port_no}) for link in links]
+        self.raw_links = links
 
-        for switch in switches:
-            occupied_ports = []
-            outgoing = 0
-            for link in links:
-                if link[0] == switch:
-                    outgoing += 1
-                    occupied_ports.append(link[2]["port"])
-            if outgoing == int(self.topo_net.num_ports/2):
-                self.edge_switches.append((switch, occupied_ports.copy()))
+        num_edge_links = self.topo_net.num_ports**2
+        total_num_ports = self.topo_net.num_ports * len(self.topo_net.switches)
+        has_required_number_of_links = (len(links) == total_num_ports - num_edge_links)
 
-            occupied_ports.clear()
-
-
-        if self.initialized or not (len(links) == self.topo_net.num_ports * len(self.topo_net.switches) - self.topo_net.num_ports**2):
+        if self.initialized or not has_required_number_of_links:
             return
 
+        def find_edge_switches(switches, links):
+            edge_switches = []
+            for switch in switches:
+                print(f"sw{switch}")
+                occupied_ports = []
+                outgoing = 0
+                for link in links:
+                    if link[0] == switch:
+                        outgoing += 1
+                        occupied_ports.append(link[2]["port"])
+                if outgoing == int(self.topo_net.num_ports/2):
+                    edge_switches.append((switch, occupied_ports.copy()))
+                occupied_ports.clear()
+            return edge_switches
+
+        self.edge_switches = find_edge_switches(switches, links)
+
+        def add_edges_to_mst(mst):
+            self.custom_topo = topo.MininetTopology(switches, links)
+            extra_edges = []
+            for edge in links:
+                for other in mst:
+                    a, b, _ = edge
+                    c, d, _ = other
+                    if (a,b) == (d, c):
+                        extra_edges.append(edge)
+            return mst + extra_edges
+
         # Get Minimal Spanning Tree
-        mst = kruskal(switches,links)
-        self.custom_topo = topo.MininetTopology(switches, links)
-        self.raw_links = links
-        extra_edges = []
-        for edge in links:
-            for other in mst:
-                a, b, _ = edge
-                c, d, _ = other
-                if (a,b) == (d, c):
-                    extra_edges.append(edge)
-        mst = mst + extra_edges
+        mst = kruskal(switches, links)
+        mst = add_edges_to_mst(mst)
             
         # mst will be used for flooding, not the full network. Not forgetting edge-switches.
 
@@ -122,7 +133,7 @@ class SPRouter(app_manager.RyuApp):
                                           ofproto.OFPCML_NO_BUFFER)]
         self.add_flow(datapath, 0, match, actions)
 
-    def get_flooding_ports(self, dpid, port_in):
+    def _get_flooding_ports(self, dpid, port_in):
         flood_ports = []
         raw = self.flood_ports_switches[str(dpid)]
         for port in raw:
@@ -131,7 +142,7 @@ class SPRouter(app_manager.RyuApp):
             flood_ports.remove(port_in)
         return flood_ports
 
-    def construct_shortest_path(self, src_dpid, dst_dpid):
+    def _construct_shortest_path(self, src_dpid, dst_dpid):
         if src_dpid == dst_dpid:
             return []
         src = None
@@ -146,7 +157,6 @@ class SPRouter(app_manager.RyuApp):
         path = [x.id for x in path]
         return path
 
-
     # Add a flow entry to the flow-table
     def add_flow(self, datapath, priority, match, actions):
         ofproto = datapath.ofproto
@@ -157,7 +167,6 @@ class SPRouter(app_manager.RyuApp):
         mod = parser.OFPFlowMod(datapath=datapath, priority=priority,
                                 match=match, instructions=inst)
         datapath.send_msg(mod)
-
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
@@ -197,25 +206,39 @@ class SPRouter(app_manager.RyuApp):
             src = ip_pkt.src
             dst = ip_pkt.dst
 
+        print(f"arp_pkt: {arp_pkt} ")
+        print(f"ip_pkt: {ip_pkt} ")
+        print(f"src: {src} - dst: {dst}\n")
+
         ##### Shortest Path Routing #####
-        if not src in self.ipv4_dests:
-            self.ipv4_dests[src] = (dpid, in_port)
+
+        # Add to IP table
+        # if not src in self.ipv4_dests:
+        self.ipv4_dests[src] = (dpid, in_port)
+        
+        # for k, (dpid, port) in self.ipv4_dests.items():
+        #     print(f"src:{k}: (dpid: {dpid}, port: {port}")
+
+        # print("****")
         
         # Find next switch to be reached and add to flowtable of the switch
-        if dst in self.ipv4_dests:
+        destination_can_be_reached = dst in self.ipv4_dests
+        if destination_can_be_reached: # Can reach destination
             # Calculate path between dpids
             src_dpid = dpid
             dst_dpid = self.ipv4_dests[dst][0]
-            path = self.construct_shortest_path(src_dpid, dst_dpid)
+            path = self._construct_shortest_path(src_dpid, dst_dpid)
+
+            # Determine out_port
             if len(path) == 0:
-                # at source
+                # At destination switch, do lookup of port to destination IP/server
                 out_port = self.ipv4_dests[dst][1]
             else:
+                # Not at destination switch yet, find port of next hop
                 dst_dpid = path[1]
-                for link in self.raw_links:
-                    if link[0] == src_dpid and link[1] == dst_dpid:
-                        out_port = link[2]['port']
+                out_port = self._get_out_port(src_dpid, dst_dpid)
 
+            # Add flow from src IP to dst IP when at this switch
             match = parser.OFPMatch(in_port=in_port, ipv4_dst=dst, ipv4_src=src)
             actions = [parser.OFPActionOutput(out_port)]
             self.add_flow(datapath, 1, match, actions)
@@ -225,20 +248,30 @@ class SPRouter(app_manager.RyuApp):
                                   in_port=in_port, actions=actions, data=data)
             datapath.send_msg(out) 
             return
-        ##### Flooding using mst (Minimal Spanning Tree) #####
+        else:
+            ##### Flooding using mst (Minimal Spanning Tree) #####
+            
+            # Do flooding 
+            actions = []
+            out_ports = self._get_flooding_ports(dpid, in_port)
+            for port in out_ports:
+                print(f"flood_port for sw {dpid}: {port}")
+                actions.append(parser.OFPActionOutput(port))
 
-        # Reached if flooding is needed
-        actions = []
-        out_ports = self.get_flooding_ports(dpid, in_port)
-        for port in out_ports:
-            actions.append(parser.OFPActionOutput(port))
+            match = parser.OFPMatch(in_port=in_port, ipv4_dst=dst, ipv4_src=src)
+        
+            data = None
+            if msg.buffer_id == ofproto.OFP_NO_BUFFER:
+                data = msg.data
 
-        match = parser.OFPMatch(in_port=in_port, ipv4_dst=dst, ipv4_src=src)
-    
-        data = None
-        if msg.buffer_id == ofproto.OFP_NO_BUFFER:
-            data = msg.data
+            out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
+                                    in_port=in_port, actions=actions, data=data)
+            datapath.send_msg(out)
 
-        out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
-                                  in_port=in_port, actions=actions, data=data)
-        datapath.send_msg(out)
+
+    def _get_out_port(self, src_dpid, dst_dpid):
+        """Returns the port in src_dpid that leads to dst_dpid
+        """
+        for link in self.raw_links:
+            if link[0] == src_dpid and link[1] == dst_dpid:
+                return link[2]['port']
