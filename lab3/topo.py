@@ -21,6 +21,30 @@ import queue
 import argparse
 from enum import Enum, auto
 
+class MininetTopology:
+	def __init__(self, switches, edges):
+		self.switches = []
+		self.servers = []
+		for switch in switches:
+			self.switches.append(Node(switch, "switch"))
+		self.edges = edges
+		self.generate()
+
+	def generate(self):
+		for edge in self.edges:
+			src, dst, _ = edge
+			src_switch = None
+			dst_switch = None
+			for switch in self.switches:
+				if switch.id == src:
+					src_switch = switch
+				if switch.id == dst:
+					dst_switch = switch
+			if not src_switch or not dst_switch:
+				print("switch not found")
+			src_switch.add_edge(dst_switch)
+
+
 # Class for an edge in the graph
 class Edge:
     def __init__(self):
