@@ -18,8 +18,5 @@ cd lab3
 vagrant ssh
 
 cd lab3
-python3 -m unittest
-
-# individual
-python3 -m unittest test_address.py
+./test.sh
 ```
