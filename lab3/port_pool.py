@@ -7,7 +7,7 @@ class PortPool:
     first half of k ports [1, 2], downstream (subnet) ports are second half k ports [3, 4], 
     for k = 4.
 
-    Note: only works with pod nodes as a src
+    Note: DOES NOT WORK ON CORE SWITCHES AS A SRC
     """
     def __init__(self, k) -> None:
         self._port_pool = {}
@@ -26,27 +26,21 @@ class PortPool:
         Returns:
             Optional[int]: A free port.
         """
-        # self._validate_input(addr_src, addr_dst)
 
         k = self.k
 
+        # From host to edge
         if (addr_src.is_host_address(k)):
             return self._take(addr_src, "host")
 
         is_upstream: bool = (addr_dst.is_core_address()
             or (addr_src.is_edge_node_address(k) and addr_dst.is_aggr_node_address(k)))
-        if (is_upstream): # from aggr to core or from pod node to pod node
-            # return port 3 or 4 for k=4
+        if (is_upstream): # From aggr to core or from pod node to pod node
+            # Return port 3 or 4 for k=4
             return self._take(addr_src, "upstream_range")
-        else:
+        else: # From aggr to edge
             return self._take(addr_src, "downstream_range")
 
-    # def _validate_input(self, addr_src: Address, addr_dst: Address):
-    #     if (not addr_src.is_pod_address(self.k)
-    #             or (addr_dst.is_host_address(self.k))
-    #         ):
-    #         raise ValueError(f"Invalid argument(s). Given: {addr_src} and {addr_dst} Should be of type:"
-    #             + " addr_src: a pod switch, addr_dst: a pod or core switch")
 
     # Take free port from port pool
     def _take(self, addr_src: Address, type):
@@ -58,12 +52,12 @@ class PortPool:
             self._port_pool[raw_src] = {
                 "downstream_range": [x for x in range(1, int(k/2) + 1)],  # 1, 2 for k=4
                 "upstream_range" : [x for x in range(int(k/2) + 1, k + 1)],  # 3, 4 for k=4
-                "host": [1] # Host only has one link to edge node
+                "host": [1] # Host only has one link/port to edge node
             }
-        available_ports = self._port_pool[raw_src][type]
-        if (not available_ports):
+        available_ports = self._port_pool[raw_src][type] # Get correct type
+        if (not available_ports): # If none in pool for type
             return None
-        free_port = available_ports.pop(0)
-        self._port_pool[raw_src][type] = available_ports
+        free_port = available_ports.pop(0) # Remove first from pool
+        self._port_pool[raw_src][type] = available_ports # Update remaining pool
         return free_port
 

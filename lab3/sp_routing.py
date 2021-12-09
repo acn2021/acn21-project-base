@@ -299,10 +299,6 @@ class SPRouter(app_manager.RyuApp):
         
         src_node_id = self.id_mapping.get_node_id_from_dpid(src_dpid)
         dst_node_id = self.id_mapping.get_node_id_from_dpid(dst_dpid)
-        # print("******** PATH")
-        # print(next_hop_dpid)
-        # print(self.id_mapping.get_node_id_from_dpid(next_hop_dpid))
-                
 
         # Determine out_port
         if next_hop_dpid is None:

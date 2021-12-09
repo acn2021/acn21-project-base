@@ -55,100 +55,31 @@ class SwitchRoutingTables:
 
     def lookup_port(self, src_node_id, dst_node_id):
         dest_address = Address(dst_node_id)
-        # print(f"From: {dest_address.raw}")
         # Match on prefix
         for i in range(0, len(self.prefix_tables[src_node_id])):
             row = self.prefix_tables[src_node_id][i]
-            # print(f"Compare with prefix: {row['prefix'].raw}")
             if (dest_address.matches(row["prefix"])):
-                # print("MATCH!")
-                # print(row["port"])
                 return row["port"]
-            # print("no match")
                 
-            # Do lookup in suffix table linked to the last entry of the prefix table
+            # If no prefix found, do lookup in suffix table linked 
+            # to the last entry of the prefix table (0.0.0.0/0)
             zero_prefix_reached = i == len(self.prefix_tables[src_node_id]) - 1
             if (zero_prefix_reached):
                 suffix_table = row["suffix_table"]
                 for suffix_row in suffix_table:
                     suffix_address = Address(suffix_row["suffix"])
-                    # print(f"Compare with suffix: {suffix_address.raw}")
 
                     if (dest_address.matches(suffix_address, mode="right-handed")):
-                        # print("MATCH!")
-                        # print(suffix_row["port"])
                         return suffix_row["port"]
-                    # print("no match")
-
-    # def sync_ports(self, get_links_data, id_mapping: IDMapping):
-    #     n_updates = 0
-    #     # Get correct port data from topo
-    #     for link in get_links_data:
-    #         src_node_id = id_mapping.get_node_id_from_dpid(link[0])
-    #         # print(src_node_id)
-    #         dest_node_id = id_mapping.get_node_id_from_dpid(link[1])
-    #         # print(link)
-    #         port = link[2]["port"]
-    #         # Sync prefix tables ports
-    #         for switch, table in self.prefix_tables.items():
-    #             if (switch == src_node_id): # found table entry that matches current link
-    #                 for entry in table:
-    #                     prefix = entry["prefix"]
-    #                     if (Address(dest_node_id).matches(prefix)):
-    #                         # Update
-    #                         # print(f"Updating port {entry['port']} with {port}")
-    #                         if (entry["port"] != port):
-    #                             entry["port"] = port
-    #                             n_updates += 1
-    #                     else:
-    #                         suffix_table = entry["suffix_table"]
-    #                         for suffix_row in suffix_table:
-    #                             suffix_address = Address(suffix_row["suffix"])
-
-    #                             if (Address(dest_node_id).matches(suffix_address, mode="right-handed")):
-    #                                 if (entry["port"] != port):
-    #                                     entry["port"] = port
-    #                                     # n_updates += 1
-
-            # print("NUMBER OF TABLE UPDATES = ", n_updates)
-
-    def _find_correct_port(self, src, dst):
-        dst = Address(dst)
-
-        # Prefix: find links where src matches given src
-        for link in self.links:
-            src_node_id = self.id_mapping.get_node_id_from_dpid(link[0])
-            dest_node_id = self.id_mapping.get_node_id_from_dpid(link[1])
-            port = link[2]["port"]
-
-            if (src_node_id == src):
-                # If destination matches given destination, return the port
-                if (Address(dest_node_id).matches(dst)): # Prefix matching
-                    # print(f"Match: ({src} - {dst}) on ({src_node_id} - {dest_node_id}) port {port}")
-                    return port
-
-        # Suffix: find links where src matches given src
-        for link in self.links:
-            src_node_id = self.id_mapping.get_node_id_from_dpid(link[0])
-            dest_node_id = self.id_mapping.get_node_id_from_dpid(link[1])
-            port = link[2]["port"]
-
-            if (src_node_id == src):
-                # If destination matches given destination, return the port
-                if (Address(dest_node_id).matches(dst, "right-handed")):  # Suffix matching
-                    print(f"Match: ({src} - {dst}) on ({src_node_id} - {dest_node_id}) port {port}")
-                    return port
     
     def _generate_core_switch_routing_tables(self):
         k = self.k
         for j in range(1, int(k/2) + 1):
             for i in range(1, int(k/2) + 1):
-                # for dest_pod_num in range(0, int(k/2)):
                 for dest_pod_num in range(0, k):
                     x = dest_pod_num
                     src = f"10.{k}.{j}.{i}"
                     dst = f"10.{x}.0.0/16"
-                    # port = self._find_correct_port(src, dst)
                     self._addPrefix(src, dst, x + 1)
 
     def _generate_aggr_switch_routing_tables(self):
@@ -163,7 +94,6 @@ class SwitchRoutingTables:
                     # Destination subnet switch / edge switch (in pod)
                     src = f"10.{x}.{z}.1"
                     dst = f"10.{x}.{i}.0/24"
-                    # port = self._find_correct_port(src, dst)
                     self._addPrefix(src, dst, i + 1)
 
                 self._addPrefix(f"10.{x}.{z}.1", f"0.0.0.0/0", 0)
@@ -173,9 +103,7 @@ class SwitchRoutingTables:
                     # Link going upwards from pod node 
                     src = f"10.{x}.{z}.1"
                     dst = f"0.0.0.{i}/8"
-                    # port = self._find_correct_port(src, dst)
                     self._addSuffix(src, dst, 1 + int( ((i - 2 + z) % (k/2)) + (k/2)) )
-                        # int((i - 2 + z) % (k/2) + (k/2)))
 
     def _generate_edge_switch_routing_tables(self):
         k = self.k
@@ -190,9 +118,7 @@ class SwitchRoutingTables:
                     i = host_id
                     src = f"10.{x}.{z}.1"
                     dst = f"0.0.0.{i}/8"
-                    # port = self._find_correct_port(src, dst)
                     self._addSuffix(src, dst, 1 + int( ((i - 2 + z) % (k/2)) + (k/2)) )
-                        # int((i - 2 + z) % (k/2) + (k/2)) - 2)
 
     def _addPrefix(self, switch, prefix, port):
         prefix_addr = Address(prefix)
