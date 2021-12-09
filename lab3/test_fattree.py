@@ -45,7 +45,6 @@ class TestFattree(unittest.TestCase):
         cls.net_topo = FattreeNet(ft_topo)
 
     def test_core_links(self):
-        # TODO check 4 or 3 for concrete value, which is it?
         net_topo = self.net_topo
         # First core switch to left aggr switch of each pod
         assert net_topo._determine_ports(

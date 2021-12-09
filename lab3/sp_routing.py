@@ -158,20 +158,6 @@ class SPRouter(app_manager.RyuApp):
             return None
         return path[1]
 
-    # TODO: Check if we flood too many ports, since I think we need to 
-    # only flood edge ports to servers?
-
-    # Sample output:
-    # flood_port for sw 17: 4
-    # flood_port for sw 17: 3
-    # flood_port for sw 18: 2
-    # flood_port for sw 18: 4
-    # flood_port for sw 35: 2
-    # flood_port for sw 35: 4
-    # flood_port for sw 35: 3 <-- sw 35 has one too many
-    # flood_port for sw 19: 1
-    # flood_port for sw 19: 3
-    # flood_port for sw 19: 4 <-- sw 19 has one too many
     def _get_flooding_ports(self, dpid, port_in):
         flood_ports = []
         raw = self.flood_ports_switches[str(dpid)]
