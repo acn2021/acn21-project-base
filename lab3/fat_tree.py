@@ -102,14 +102,34 @@ class FattreeNet(Topo):
         # Now that all hosts and switches are added to the topo, add links 
         # from `links_to_add` to the mininet topo links
         for link in links_to_add:
-            mininet_node_id_1 = self.id_mapping.get_mininet_id(link[0])
-            mininet_node_id_2 = self.id_mapping.get_mininet_id(link[1])
+            print("link:")
+            print(link)
+            mininet_node_id_1 = self.id_mapping.get_mininet_id(link[0]) # e.g. h0, s16
+            mininet_node_id_2 = self.id_mapping.get_mininet_id(link[1]) # e.g. h0, s16
             self.addLink(
                 node1=mininet_node_id_1,
                 node2=mininet_node_id_2,
                 bw=link_bw,
                 delay=link_delay
             )
+
+
+    """ Example pair input
+        link:
+        ('10.0.0.1', '10.0.2.1')
+        link:
+        ('10.0.1.1', '10.0.2.1')
+        link:
+        ('10.0.2.1', '10.4.1.1')
+        link:
+        ('10.0.2.1', '10.4.1.2')
+        link:
+        ('10.0.0.1', '10.0.0.2')
+        link:
+        ('10.0.0.1', '10.0.0.3')
+    """
+    def _determine_ports(self, node_id_1, node_id_2):
+        pass
 
 
 def make_mininet_instance(graph_topo):

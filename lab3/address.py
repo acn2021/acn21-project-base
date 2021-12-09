@@ -25,6 +25,10 @@ class Address:
     def _get_octets(self, address):
         return 
 
+    def is_host_address(self, k: int):
+        if (self.octets[1] != str(k) and int(self.octets[3]) >= 2):
+            return True
+
     def matches(self, other_address, mode: str = "left-handed") -> bool:
         """Check if this address matches with another, based on the mask of the other.
         Ignores mask of self.

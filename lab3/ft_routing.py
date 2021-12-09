@@ -47,8 +47,6 @@ class FTRouter(SPRouter):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.switch_routing_tables = SwitchRoutingTables(4)
-
 
     # Topology discovery
     @set_ev_cls(event.EventSwitchEnter)
@@ -56,48 +54,42 @@ class FTRouter(SPRouter):
         super().get_topology_data(ev)
         # links = [(link.src.dpid, link.dst.dpid, {'port': link.src.port_no}) for link in get_link(self, None)]
         # links = []
-        self.switch_routing_tables.sync_ports(self.raw_links, self.id_mapping)
+        if (self.initialized):
+            self.switch_routing_tables = SwitchRoutingTables(4, self.raw_links, self.id_mapping)
 
+        # self.switch_routing_tables.sync_ports(self.raw_links, self.id_mapping)
 
     # @override
-    def get_port_of_next_hop(self, dst, src_dpid, dst_dpid):
+    def get_port_of_next_hop(self, dst_ip, src_dpid, dst_dpid):
+        """[summary]
+
+        Args:
+            dst ([type]): [description]
+            src_dpid ([type]): switch dpid, e.g. 17, 21
+            dst_dpid ([type]): switch dpid, e.g. 21, 17
+
+        Returns:
+            [type]: [description]
+        """
+        # print(self.switch_routing_tables)
+
         src_node_id = self.id_mapping.get_node_id_from_dpid(src_dpid)
-        dst_node_id = self.id_mapping.get_node_id_from_dpid(dst_dpid)
+        # dst_node_id = self.id_mapping.get_node_id_from_dpid(dst_dpid)
+        dst_host_node_id = self.id_mapping.get_node_id_from_ip(dst_ip)
+        print(f"dpid: FROM: {src_dpid} TO: {dst_dpid} (dst ip: {dst_ip})")
+        print(f"switch node id: FROM: {src_node_id} TO host node id: {dst_host_node_id}")
 
-        self.switch_routing_tables.prefix_tables[src_node_id]
+        print(f"*** Routing table for {src_node_id}")
+        for row in self.switch_routing_tables.prefix_tables[src_node_id]:
+            print(f"prefix: {row['prefix']}  - port: {row['port']}")
+            print("suffix table:", row['suffix_table'])
+            print("***")
         
-        port_of_next_hop = self.switch_routing_tables.lookup_port(src_node_id, dst_node_id)
+        port_of_next_hop = self.switch_routing_tables.lookup_port(src_node_id, dst_host_node_id)
+        print(f"next hop from sw {src_node_id} to (eventually) sw {dst_host_node_id} via port {port_of_next_hop}")
 
+        # Determine out_port
+        if port_of_next_hop is None:
+            # At edge switch, do lookup of port to destination IP/server
+            port_of_next_hop = self.ipv4_dests[dst_ip][1]
         return port_of_next_hop
-        print(f"Port for next hop: {port}")
-        next_hop_dpid = self._get_neighbor_by_port(src_dpid, port)
-        return self.id_mapping.get_dpid(next_hop_dpid)
-
-    def _get_neighbor_by_port(self, src_dpid, port):
-        print(f"src_dpid {src_dpid}")
-        print(f"port: {port}")
-        for link in self.raw_links:
-            print(link)
-            if link[0] == src_dpid and link[2]['port'] == port:
-                print(f"result + {link[1]}")
-                return link[1]
-        # Get fattree node ids
-        # src_node_id = self.id_mapper.get_node_id_from_dpid(src_dpid)
-        # dst_node_id = self.id_mapper.get_node_id_from_dpid(dst_dpid)
-
-        # src_octets = src_node_id.split(".")
-        # dst_octets = dst_node_id.split(".")
-
-        # # Routing for core switch on /16 prefix
-        # is_core_switch = src_octets[1] == 4
-        # if (is_core_switch):
-        #     for (other_dpid, port_no) in self.raw_links[src_dpid]:
-        #         # match outgoing link dpid to /16 prefix
-        #         other_node_id = self.id_mapper.get_node_id_from_dpid(other_dpid)
-        #         other_octets = other_node_id.split(".")
-        #         if (dst_octets[1] == other_node_id[1]): # [1] is the second octet, i.e. /16 prefix
-        #             return other_dpid
-        # else:
-        #     pass
-        
-

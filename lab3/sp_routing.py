@@ -121,6 +121,11 @@ class SPRouter(app_manager.RyuApp):
                     self.flood_ports_switches[str(switch)].append({'port': i})
 
         self.initialized = True
+        # for link in self.raw_links:
+        #     src_node_id = self.id_mapping.get_node_id_from_dpid(link[0])
+        #     dst_node_id = self.id_mapping.get_node_id_from_dpid(link[1])
+        #     port = link[2]['port']
+        #     print(f"src: {src_node_id} - dst: {dst_node_id} - port: {port}")
         print("Controller initialized")
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
@@ -217,7 +222,7 @@ class SPRouter(app_manager.RyuApp):
         pkt = packet.Packet(msg.data)
         eth = pkt.get_protocols(ethernet.ethernet)[0]
 
-        dst = eth.dst
+        dst_ip = eth.dst
         src = eth.src
 
         dpid = datapath.id
@@ -236,10 +241,12 @@ class SPRouter(app_manager.RyuApp):
 
         if arp_pkt:
             src = arp_pkt.src_ip
-            dst = arp_pkt.dst_ip
+            dst_ip = arp_pkt.dst_ip
         else:
             src = ip_pkt.src
-            dst = ip_pkt.dst
+            dst_ip = ip_pkt.dst
+
+        print(f"FROM: {src} TO: {dst_ip}")
 
         ##### Shortest Path Routing #####
 
@@ -248,18 +255,18 @@ class SPRouter(app_manager.RyuApp):
             self.ipv4_dests[src] = (dpid, in_port)
         
         # Find next switch to be reached and add to flowtable of the switch
-        destination_can_be_reached = dst in self.ipv4_dests
+        destination_can_be_reached = dst_ip in self.ipv4_dests
         if destination_can_be_reached: # Can reach destination
             # Calculate path between dpids
             src_dpid = dpid
-            dst_dpid = self.ipv4_dests[dst][0]
+            dst_dpid = self.ipv4_dests[dst_ip][0]
 
-            out_port = self.get_port_of_next_hop(dst, src_dpid, dst_dpid)
+            out_port = self.get_port_of_next_hop(dst_ip, src_dpid, dst_dpid)
 
             # Add flow from src IP to dst IP when at this switch
-            match = parser.OFPMatch(in_port=in_port, ipv4_dst=dst, ipv4_src=src)
+            match = parser.OFPMatch(in_port=in_port, ipv4_dst=dst_ip, ipv4_src=src)
             actions = [parser.OFPActionOutput(out_port)]
-            print(f"Adding flow, dst: {dst} - src: {src} - in_port: {in_port} - out_port: {out_port}")
+            print(f"Adding flow, dst: {dst_ip} - src: {src} - in_port: {in_port} - out_port: {out_port}")
             self.add_flow(datapath, 1, match, actions)
 
             data = msg.data
@@ -277,7 +284,7 @@ class SPRouter(app_manager.RyuApp):
                 # print(f"flood_port for sw {dpid}: {port}")
                 actions.append(parser.OFPActionOutput(port))
 
-            match = parser.OFPMatch(in_port=in_port, ipv4_dst=dst, ipv4_src=src)
+            match = parser.OFPMatch(in_port=in_port, ipv4_dst=dst_ip, ipv4_src=src)
         
             data = None
             if msg.buffer_id == ofproto.OFP_NO_BUFFER:
@@ -287,22 +294,26 @@ class SPRouter(app_manager.RyuApp):
                                     in_port=in_port, actions=actions, data=data)
             datapath.send_msg(out)
 
-    def get_port_of_next_hop(self, dst, src_dpid, dst_dpid):
+    def get_port_of_next_hop(self, dst_ip, src_dpid, dst_dpid):
         next_hop_dpid = self.get_next_hop_dpid(src_dpid, dst_dpid)
-
-        print("******** PATH")
-        print(next_hop_dpid)
-        print(self.id_mapping.get_node_id_from_dpid(next_hop_dpid))
+        
+        src_node_id = self.id_mapping.get_node_id_from_dpid(src_dpid)
+        dst_node_id = self.id_mapping.get_node_id_from_dpid(dst_dpid)
+        # print("******** PATH")
+        # print(next_hop_dpid)
+        # print(self.id_mapping.get_node_id_from_dpid(next_hop_dpid))
                 
 
-            # Determine out_port
+        # Determine out_port
         if next_hop_dpid is None:
                 # At destination switch, do lookup of port to destination IP/server
-            out_port = self.ipv4_dests[dst][1]
+            out_port = self.ipv4_dests[dst_ip][1]
         else:
                 # Not at destination switch yet, find port of next hop
             dst_dpid = next_hop_dpid
             out_port = self._get_out_port(src_dpid, dst_dpid)
+
+        print(f"next hop from sw {src_node_id} to sw {dst_node_id} via port {out_port}")
         return out_port
 
 
