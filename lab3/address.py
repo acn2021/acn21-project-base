@@ -22,12 +22,22 @@ class Address:
         # [10, 0, 1, 1]
         self.octets = split[0].split(".")
 
-    def _get_octets(self, address):
-        return 
-
     def is_host_address(self, k: int):
         if (self.octets[1] != str(k) and int(self.octets[3]) >= 2):
             return True
+
+    def is_core_address(self):
+        if (self.octets[1] == str(4)):
+            return True
+        
+    def is_pod_address(self, k):
+        return not self.is_host_address(k) and not self.is_core_address()
+
+    def is_edge_node_address(self, k):
+        return self.is_pod_address(k) and int(self.octets[2]) < k/2
+
+    def is_aggr_node_address(self, k):
+        return self.is_pod_address(k) and not self.is_edge_node_address(k)
 
     def matches(self, other_address, mode: str = "left-handed") -> bool:
         """Check if this address matches with another, based on the mask of the other.

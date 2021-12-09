@@ -33,6 +33,8 @@ from mininet.topo import Topo
 from mininet.util import waitListening, custom
 
 import topo
+from address import Address
+from port_pool import PortPool
 
 class FattreeNet(Topo):
     """
@@ -48,6 +50,7 @@ class FattreeNet(Topo):
         LATENCY = "5ms"
         self.topo = ft_topo
         self.id_mapping = IDMapping(self.topo)
+        self.port_pool = PortPool(self.topo.num_ports)
 
         self._create_topology(BANDWIDTH, LATENCY)
 
@@ -106,9 +109,12 @@ class FattreeNet(Topo):
             print(link)
             mininet_node_id_1 = self.id_mapping.get_mininet_id(link[0]) # e.g. h0, s16
             mininet_node_id_2 = self.id_mapping.get_mininet_id(link[1]) # e.g. h0, s16
+            (port1, port2) = self._determine_ports(link[0], link[1])
             self.addLink(
                 node1=mininet_node_id_1,
                 node2=mininet_node_id_2,
+                port1=port1,
+                port2=port2,
                 bw=link_bw,
                 delay=link_delay
             )
@@ -129,7 +135,23 @@ class FattreeNet(Topo):
         ('10.0.0.1', '10.0.0.3')
     """
     def _determine_ports(self, node_id_1, node_id_2):
-        pass
+        # If one is core
+        addr1 = Address(node_id_1)
+        addr2 = Address(node_id_2)
+        port1 = None
+        port2 = None
+
+        # Core and aggr-to-core
+        if (addr1.is_core_address()):
+            port1 = int(addr2.octets[1]) + 1
+        else:
+            port1 = self.port_pool.get_free_port(addr1, addr2)
+
+        if (addr2.is_core_address()):
+            port2 = int(addr1.octets[1]) + 1
+        else:
+            port2 = self.port_pool.get_free_port(addr2, addr1)
+        return (port1, port2)
 
 
 def make_mininet_instance(graph_topo):
@@ -156,5 +178,6 @@ def run(graph_topo):
     net.stop()
 
 
-ft_topo = topo.Fattree(4)
-run(ft_topo)
+if __name__ == '__main__':
+    ft_topo = topo.Fattree(4)
+    run(ft_topo)

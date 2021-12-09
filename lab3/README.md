@@ -10,3 +10,16 @@ vagrant ssh
 cd lab3
 ./run.sh
 ```
+
+
+## Run unit tests
+
+```sh
+vagrant ssh
+
+cd lab3
+python3 -m unittest
+
+# individual
+python3 -m unittest test_address.py
+```

@@ -25,7 +25,39 @@ class TestAddress(unittest.TestCase):
         assert not Address("10.0.2.1").matches(Address("0.0.0.2/8"), mode="right-handed")
         assert not Address("10.0.2.2").matches(Address("0.0.0.1/8"), mode="right-handed")
 
+    def test_is_host_address(self):
+        k = 4
+        assert Address("10.0.0.2").is_host_address(k)
+        assert Address("10.0.0.3").is_host_address(k)
+        assert Address("10.0.1.2").is_host_address(k)
+        assert Address("10.0.1.3").is_host_address(k)
+        assert not Address("10.4.1.3").is_host_address(k)
+        assert not Address("10.0.0.1").is_host_address(k)
+        assert not Address("10.0.1.1").is_host_address(k)
 
+    def test_is_pod_address(self):
+        k = 4
+        assert Address("10.0.0.1").is_pod_address(k)
+        assert Address("10.0.1.1").is_pod_address(k)
+        assert Address("10.0.2.1").is_pod_address(k)
+        assert Address("10.0.3.1").is_pod_address(k)
+        assert Address("10.3.3.1").is_pod_address(k)
+        assert not Address("10.0.0.2").is_pod_address(k)
+        assert not Address("10.4.0.1").is_pod_address(k)
+
+    def test_is_edge_address(self):
+        k = 4
+        assert Address("10.0.0.1").is_edge_node_address(k)
+        assert Address("10.0.1.1").is_edge_node_address(k)
+        assert not Address("10.0.2.1").is_edge_node_address(k)
+        assert not Address("10.0.3.1").is_edge_node_address(k)
+
+    def test_is_aggr_address(self):
+        k = 4
+        assert Address("10.0.2.1").is_aggr_node_address(k)
+        assert Address("10.0.3.1").is_aggr_node_address(k)
+        assert not Address("10.0.0.1").is_aggr_node_address(k)
+        assert not Address("10.0.1.1").is_aggr_node_address(k)
 
 if __name__ == '__main__':
     unittest.main()
