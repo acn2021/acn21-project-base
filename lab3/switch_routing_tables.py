@@ -51,7 +51,7 @@ class SwitchRoutingTables:
         self._generate_core_switch_routing_tables()
         self._generate_aggr_switch_routing_tables()
         self._generate_edge_switch_routing_tables()
-        print(self)
+        # print(self)
 
     def lookup_port(self, src_node_id, dst_node_id):
         dest_address = Address(dst_node_id)

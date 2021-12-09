@@ -52,12 +52,8 @@ class FTRouter(SPRouter):
     @set_ev_cls(event.EventSwitchEnter)
     def get_topology_data(self, ev):
         super().get_topology_data(ev)
-        # links = [(link.src.dpid, link.dst.dpid, {'port': link.src.port_no}) for link in get_link(self, None)]
-        # links = []
         if (self.initialized):
             self.switch_routing_tables = SwitchRoutingTables(4, self.raw_links, self.id_mapping)
-
-        # self.switch_routing_tables.sync_ports(self.raw_links, self.id_mapping)
 
     # @override
     def get_port_of_next_hop(self, dst_ip, src_dpid, dst_dpid):
@@ -71,25 +67,43 @@ class FTRouter(SPRouter):
         Returns:
             [type]: [description]
         """
-        # print(self.switch_routing_tables)
 
+        # Check if we can route directly to host
+        path_to_host = self.ipv4_dests.get(dst_ip)
+        if (path_to_host):
+            edge_switch_dpid = path_to_host[0]
+            at_correct_edge_switch = edge_switch_dpid == src_dpid
+            if (at_correct_edge_switch):
+                return path_to_host[1]
+
+        # Otherwise use fat tree routing
         src_node_id = self.id_mapping.get_node_id_from_dpid(src_dpid)
-        # dst_node_id = self.id_mapping.get_node_id_from_dpid(dst_dpid)
         dst_host_node_id = self.id_mapping.get_node_id_from_ip(dst_ip)
-        print(f"dpid: FROM: {src_dpid} TO: {dst_dpid} (dst ip: {dst_ip})")
-        print(f"switch node id: FROM: {src_node_id} TO host node id: {dst_host_node_id}")
+        port_of_next_hop = self.switch_routing_tables.lookup_port(src_node_id, dst_host_node_id)
+        
+        # self.print_hop(src_dpid, dst_dpid, src_node_id, dst_host_node_id, port_of_next_hop)
+        return port_of_next_hop
+
+    def print_hop(self, src_dpid, dst_dpid, src_node_id, dst_host_node_id, port_of_next_hop):
+        print("\n-----------HOP------------")
+
+        print("self.ipv4_dests:")
+        print(self.ipv4_dests)
 
         print(f"*** Routing table for {src_node_id}")
         for row in self.switch_routing_tables.prefix_tables[src_node_id]:
             print(f"prefix: {row['prefix']}  - port: {row['port']}")
             print("suffix table:", row['suffix_table'])
             print("***")
-        
-        port_of_next_hop = self.switch_routing_tables.lookup_port(src_node_id, dst_host_node_id)
-        print(f"next hop from sw {src_node_id} to (eventually) sw {dst_host_node_id} via port {port_of_next_hop}")
-
-        # Determine out_port
-        if port_of_next_hop is None:
-            # At edge switch, do lookup of port to destination IP/server
-            port_of_next_hop = self.ipv4_dests[dst_ip][1]
-        return port_of_next_hop
+        print(f"""
+        FROM:
+            dpid:\t{src_dpid}
+            node_id:\t{src_node_id}
+        TO SWITCH:
+            dpid:\t{dst_dpid}
+        EVENTUAL HOST:
+            node_id:\t{dst_host_node_id}
+        THROUGH PORT:
+            port:\t{port_of_next_hop}
+        """)
+        print("-----------END HOP------------")
