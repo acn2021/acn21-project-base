@@ -18,4 +18,4 @@
 #!/bin/bash
 
 export PYTHONPATH="$PYTHONPATH:$HOME/mininet"
-sudo --preserve-env=PYTHONPATH python3 ./fat-tree.py
+sudo --preserve-env=PYTHONPATH python3 ./fat_tree.py
