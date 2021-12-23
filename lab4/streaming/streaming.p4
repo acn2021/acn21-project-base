@@ -63,7 +63,7 @@ header rtp_t {
 }
 
 struct metadata {
-    /* empty */
+    bit<16> length_without_ip_header;
 }
 
 // Define struct with two headers (unordered items)
@@ -101,6 +101,10 @@ parser MyParser(packet_in packet,
     state parse_ipv4 {
         // Parse the bits in order according to ipv4_t
         packet.extract(hdr.ipv4);
+
+        // Used in the UDP checksum computation
+        meta.length_without_ip_header = hdr.ipv4.totalLen - 16w20;
+
         transition select(hdr.ipv4.protocol) {
             0x11: parse_udp; // if udp, parse it
             // PROTOCOL_UDP: parse_udp;
@@ -111,14 +115,12 @@ parser MyParser(packet_in packet,
     state parse_udp {
         packet.extract(hdr.udp);
         transition parse_rtp;
-        // transition accept;
     }
 
     state parse_rtp {
         packet.extract(hdr.rtp);
         transition accept;
     }
-
 }
 
 /*************************************************************************
@@ -167,7 +169,7 @@ control MyIngress(inout headers hdr,
     port:       egress port of the next hop
     */
     action ipv4_forward(macAddr_t dstAddr, egressSpec_t port) {
-        // dstAddr and port are coming from the forwarding table?
+        // dstAddr and port are coming from the forwarding table
 
         // Set egress port for next hop
         standard_metadata.egress_spec = port;
@@ -182,6 +184,12 @@ control MyIngress(inout headers hdr,
         // decrement TTL by 1
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
     }
+
+    // Multicast to group 1, which is defined in s2 and s3-runtime.json
+    action multicast() {
+        standard_metadata.mcast_grp = 1;
+    }
+
     table debug {
         key = {
             standard_metadata.egress_spec : exact;
@@ -196,6 +204,7 @@ control MyIngress(inout headers hdr,
         }
         actions = {
             ipv4_forward;
+            multicast;
             drop;
             NoAction; // from core.p4
         }
@@ -208,8 +217,12 @@ control MyIngress(inout headers hdr,
             debug.apply();
             ipv4_lpm.apply();
         }
+        if (hdr.udp.isValid()) {
+            // Set checksum to 0 (ignore it), since we cannot manage
+            // to correctly recompute the UDP checksum, unfortunately..
+            hdr.udp.checksum = 0;
+        }
     }
-
 }
 
 /*************************************************************************
@@ -219,7 +232,19 @@ control MyIngress(inout headers hdr,
 control MyEgress(inout headers hdr,
                  inout metadata meta,
                  inout standard_metadata_t standard_metadata) {
+
     apply {
+        // Prune multicast packet to ingress port to preventing loop
+        if (standard_metadata.egress_port == standard_metadata.ingress_port) {
+            mark_to_drop(standard_metadata);
+        }
+        if (standard_metadata.egress_port == 1 && standard_metadata.mcast_grp == 1) {
+            // Assume we are in s3 and sending to h3
+            
+            // Rewrite destination ip and mac, so the packet does not get dropped by h3
+            hdr.ipv4.dstAddr = 0xA000303; // = 10.0.3.3 in hex
+            hdr.ethernet.dstAddr = 0x080000000333; // = 08:00:00:00:03:33 in hex
+        }
     }
 }
 
@@ -230,6 +255,7 @@ control MyEgress(inout headers hdr,
 control MyComputeChecksum(inout headers hdr, inout metadata meta) {
     apply {
         // docs @ https://github.com/p4lang/p4c/blob/37cd30ee9dc79c65b057a1aa168b961d7aba4701/p4include/v1model.p4#L461-L505
+        // Update the IP checksum
         update_checksum(
             hdr.ipv4.isValid(),
             {
@@ -248,6 +274,28 @@ control MyComputeChecksum(inout headers hdr, inout metadata meta) {
             hdr.ipv4.hdrChecksum,
             HashAlgorithm.csum16
         );
+
+        // TODO: Correctly recompute the UDP checksum
+        // The field `meta.length_without_ip_header` is probably not correct?
+
+        // Update the UDP checksum, including payload
+        // update_checksum_with_payload(
+        //     hdr.udp.isValid(),
+        //     {
+        //         // IP pseudo header
+        //         hdr.ipv4.srcAddr,
+        //         hdr.ipv4.dstAddr,
+        //         8w0,
+        //         hdr.ipv4.protocol,
+        //         meta.length_without_ip_header, // not sure if correct
+        //         // UDP header
+        //         hdr.udp.srcPort,
+        //         hdr.udp.dstPort,
+        //         hdr.udp.len
+        //     },
+        //     hdr.udp.checksum,
+        //     HashAlgorithm.csum16
+        // );
     }
 }
 
