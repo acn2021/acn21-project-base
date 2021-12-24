@@ -1,8 +1,8 @@
 {
-  "target": "bmv2",
-  "p4info": "build/routing.p4.p4info.txt",
-  "bmv2_json": "build/routing.json",
-  "table_entries": [
+    "target": "bmv2",
+    "p4info": "build/routing.p4.p4info.txt",
+    "bmv2_json": "build/routing.json",
+    "table_entries": [
     {
         "table": "MyIngress.ipv4_lpm",
         "default_action": true,
