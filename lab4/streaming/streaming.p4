@@ -239,7 +239,7 @@ control MyEgress(inout headers hdr,
             mark_to_drop(standard_metadata);
         }
         if (standard_metadata.egress_port == 3 && standard_metadata.mcast_grp == 1) {
-            // Assume we are in s2 and sending to h3 via s3
+            // Assume we are in s2 and sending to h3 via s3 by multicast
             
             // Rewrite destination ip and mac, so the packet does not get dropped by h3
             hdr.ipv4.dstAddr = 0xA000303; // = 10.0.3.3 (h3) in hex
