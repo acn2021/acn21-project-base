@@ -243,7 +243,7 @@ control MyEgress(inout headers hdr,
             
             // Rewrite destination ip and mac, so the packet does not get dropped by h3
             hdr.ipv4.dstAddr = 0xA000303; // = 10.0.3.3 (h3) in hex
-            hdr.ethernet.dstAddr = 0x080000000333; // = 08:00:00:00:03:00 (s3) in hex
+            hdr.ethernet.dstAddr = 0x080000000300; // = 08:00:00:00:03:00 (s3) in hex
         }
     }
 }
